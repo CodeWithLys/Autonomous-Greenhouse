@@ -1,49 +1,48 @@
-import time
-from machine import ADC, Pin, deepsleep
+const int ldrAnalogPin = 34; // Connect the AO pin of your LDR module to ESP32 GPIO34
 
-# --- Configuration for Resilience ---
+void setup() {
+  Serial.begin(115200); // Initialize serial communication at 115200 baud rate
+  Serial.println("4-Pin LDR Module - Analog Output (AO) Test");
+  Serial.println("----------------------------------------");
 
-# A0 is typically represented by pin 0 for the ADC object on the NodeMCU ESP8266
-ANALOG_PIN = 0
-adc = ADC(ANALOG_PIN)
+  // The ESP32's ADC has a default resolution of 12 bits (0-4095).
+  // This is usually sufficient. You can explicitly set it if needed:
+  // analogReadResolution(12);
 
-# Define the deep sleep duration in milliseconds. 
-# 60000 ms = 60 seconds (a low duty cycle is key for power autonomy in SA farm context)[1]
-SLEEP_TIME_MS = 60000 
+  // Default ADC attenuation is usually fine for 0-3.3V input.
+  // No need to set it unless your module outputs a voltage outside this range.
+}
 
-def read_and_transmit_data():
-    """
-    Reads the LDR sensor and simulates data processing/transmission.
-    """
-    print("\n--- Starting Light Measurement Cycle ---")
-    
-    # Read the raw analog value (0 to 1024 on a standard ESP8266)
-    light_value = adc.read()
-    
-    # --- Data Processing/Display ---
-    print(f"Current Raw Light Level (A0): {light_value}")
-    
-    # In a full system, you would establish a Wi-Fi connection here and
-    # use the MQTT protocol (which handles intermittent connections well) 
-    # to publish this 'light_value' to your central server.
-    
-    print("Data transmitted via (Simulated) MQTT.")
-    
-    return light_value
+void loop() {
+  // Read the analog value from the LDR module's AO pin
+  int ldrRawValue = analogRead(ldrAnalogPin);
 
-# --- Main Program Logic ---
+  // Print the raw analog value (0-4095 for 12-bit resolution)
+  Serial.print("Raw Analog Light Value (AO): ");
+  Serial.println(ldrRawValue);
 
-def main():
-    # 1. Read all sensor data
-    read_and_transmit_data()
-    
-    # 2. Enter Deep Sleep Mode
-    print(f"Data collected. Entering Deep Sleep for {SLEEP_TIME_MS / 1000} seconds...")
-    
-    # This command drastically cuts power consumption, minimizing battery use.
-    # CRITICAL: Ensure GPIO16 is connected to the RST pin for this timer-based wake-up to function.[2]
-    deepsleep(SLEEP_TIME_MS) 
+  // --- Interpretation of the Raw Value ---
+  // Typically, for these LDR modules:
+  //   - More light -> Higher voltage on AO -> Higher ldrRawValue
+  //   - Less light -> Lower voltage on AO -> Lower ldrRawValue
+  // (This can vary based on the exact circuit, but is common for LDR modules)
 
-# Run the main function once. Deep Sleep will reset and re-run main() after the timer expires.
-if __name__ == "__main__":
-    main()
+  // You can create a simple qualitative brightness indicator:
+  String brightnessLevel;
+  if (ldrRawValue > 3500) {
+    brightnessLevel = "Very Bright (Direct Sunlight)";
+  } else if (ldrRawValue > 2500) {
+    brightnessLevel = "Bright (Well-Lit Room)";
+  } else if (ldrRawValue > 1000) {
+    brightnessLevel = "Moderate (Cloudy Day/Indoor)";
+  } else if (ldrRawValue > 200) {
+    brightnessLevel = "Dim (Dusk/Low Light)";
+  } else {
+    brightnessLevel = "Dark (Night/Completely Covered)";
+  }
+  Serial.print("Estimated Brightness: ");
+  Serial.println(brightnessLevel);
+
+  Serial.println(); // Add a blank line for readability
+  delay(1000);      // Wait for 1 second before the next reading
+}
