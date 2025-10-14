@@ -2,40 +2,48 @@ const int mq2AnalogPin = 34; // Connect the AO pin of your MQ2 module to ESP32 G
                               // REMEMBER: If MQ2 AO outputs 0-5V, you NEED a voltage divider!
                               // This code assumes the signal entering ESP32 is 0-3.3V.
 
-// --- Calibration Variables ---
-int cleanAirBaseline = 0;   // Analog value in clean air
-const int gasWarningThreshold = 2000; // <<< ADJUST THIS VALUE after calibration!
-const int gasAlarmThreshold = 1000;   // <<< ADJUST THIS VALUE after calibration!
+// --- Calibration Variables (adjusted for more firmness) ---
+int cleanAirBaseline = 0;       // Analog value in genuinely clean air
+const int baselineBuffer = 200; // Allow for normal fluctuations (e.g., +/- 200 from baseline)
+                                // Adjust this buffer based on how "noisy" your sensor is in clean air.
+
+// Thresholds are now DIFFERENTIAL from the baseline.
+// These represent how much the reading needs to *drop* from the baseline to trigger.
+const int warningDropThreshold = 500; // Reading must drop by at least 500 from baseline for warning
+const int alarmDropThreshold = 1000;  // Reading must drop by at least 1000 from baseline for alarm
 
 void setup() {
   Serial.begin(115200);
   Serial.println("MQ2 Gas Sensor (LPG) - Analog Output (AO) Test");
   Serial.println("----------------------------------------------");
-  Serial.println(">>> IMPORTANT: MQ2 Sensor Pre-heating <<<");
-  Serial.println("Allow 20-30 seconds for the sensor to warm up for stable readings.");
-  Serial.println("Keep it in clean air during pre-heating.");
+  Serial.println(">>> CRITICAL: MQ2 Sensor Extended Pre-heating & Baseline Calibration <<<");
+  Serial.println("Place sensor in a genuinely CLEAN AIR environment.");
+  Serial.println("Allow at least 5 MINUTES for the sensor to warm up for stable readings.");
+  Serial.println("Do NOT introduce any gas or smoke during this phase.");
   Serial.println("----------------------------------------------");
 
-  // Allow pre-heating time
-  for (int i = 0; i < 30; i++) {
-    Serial.print("Pre-heating... ");
-    Serial.print(30 - i);
+  // Extended Pre-heating Time (5 minutes = 300 seconds)
+  for (int i = 0; i < 300; i++) {
+    Serial.print("Extended Pre-heating... ");
+    Serial.print(300 - i);
     Serial.println("s remaining.");
     delay(1000);
   }
-  Serial.println("Pre-heating complete. Now calibrating baseline...");
+  Serial.println("Extended Pre-heating complete. Now calibrating baseline in clean air...");
 
-  // Read baseline in clean air (after pre-heating)
+  // Read a stable baseline in clean air (after extended pre-heating)
   long sumReadings = 0;
-  for (int i = 0; i < 100; i++) { // Take 100 readings for an average baseline
+  for (int i = 0; i < 200; i++) { // Take 200 readings for a very stable average baseline
     sumReadings += analogRead(mq2AnalogPin);
-    delay(10);
+    delay(50); // Small delay between readings
   }
-  cleanAirBaseline = sumReadings / 100;
-  Serial.print("Clean Air Baseline (AO): ");
+  cleanAirBaseline = sumReadings / 200;
+  Serial.print("FINAL Clean Air Baseline (AO): ");
   Serial.println(cleanAirBaseline);
+  Serial.print("Baseline Buffer: +/- ");
+  Serial.println(baselineBuffer);
   Serial.println("----------------------------------------------");
-  Serial.println("Now observing gas levels. Introduce gas carefully for calibration.");
+  Serial.println("Now observing gas levels. Introduce gas *VERY CAREFULLY* for testing thresholds.");
   Serial.println("----------------------------------------------");
 }
 
@@ -44,27 +52,28 @@ void loop() {
   Serial.print("Current Gas Raw Value (AO): ");
   Serial.println(gasRawValue);
 
-  // --- INTERPRETATION LOGIC (Adjust based on your sensor's behavior) ---
-  // Most MQ2 modules: HIGHER gas concentration -> LOWER analogRead value.
-  // This means if gasRawValue drops significantly below cleanAirBaseline, gas is detected.
+  // Calculate the difference from the clean air baseline
+  int dropFromBaseline = cleanAirBaseline - gasRawValue;
 
-  if (gasRawValue < gasAlarmThreshold) {
-    Serial.println("!!! DANGEROUS GAS LEAK DETECTED (ALARM LEVEL) !!!");
-    // Valuable Insight: Critical Alert
-    // Actions: Trigger loud siren, cut power to gas line (if automated),
-    //          send urgent notifications to multiple contacts, log event with high priority.
-  } else if (gasRawValue < gasWarningThreshold) {
+  Serial.print("Drop from Baseline: ");
+  Serial.println(dropFromBaseline);
+
+  // --- INTERPRETATION LOGIC with FIRMER THRESHOLDS ---
+  // If the sensor value *drops* significantly from the baseline, it means gas is detected.
+  // We also need to ignore small fluctuations within our 'baselineBuffer'.
+
+  if (dropFromBaseline > alarmDropThreshold) {
+    Serial.println("!!! DANGEROUS GAS LEAK DETECTED (CRITICAL ALARM) !!!");
+    // Actions: Trigger loud siren, cut power, urgent notifications.
+  } else if (dropFromBaseline > warningDropThreshold) {
     Serial.println(">> Warning: Elevated Gas Concentration Detected <<");
-    // Valuable Insight: Precautionary Alert
-    // Actions: Send mild notification, activate ventilation fan,
-    //          log event, display visual warning (LED).
-  } else if (gasRawValue < cleanAirBaseline - 100 && gasRawValue > gasWarningThreshold) { // Slight variation from baseline
-     Serial.println("Slight increase in gas detected.");
-     // Valuable Insight: Minor fluctuation
-     // Actions: Log for trend analysis, but no immediate alert.
+    // Actions: Send mild notification, activate ventilation fan, log event.
+  } else if (dropFromBaseline > baselineBuffer) { // Detected a noticeable drop, but not yet warning level
+     Serial.println("Slight increase in gas detected (above normal fluctuation).");
+     // Actions: Log for trend analysis, subtle indication.
   }
   else {
-    Serial.println("Gas level is safe.");
+    Serial.println("Gas level is safe (within baseline fluctuations).");
   }
 
   Serial.println(); // Blank line for readability
