@@ -1,0 +1,39 @@
+const int flameSensorAnalogPin = 35; // Connect the AO pin of your flame sensor to ESP32 GPIO35
+
+void setup() {
+  Serial.begin(115200); // Initialize serial communication at 115200 baud rate
+  Serial.println("ARD151E Flame Sensor - Analog Output (AO) Test");
+  Serial.println("---------------------------------------------");
+
+  // The ESP32's ADC has a default resolution of 12 bits (0-4095).
+  // This is usually fine.
+  // analogReadResolution(12); // Uncomment if you want to explicitly set resolution
+}
+
+void loop() {
+  // Read the analog value from the flame sensor's AO pin
+  int flameRawValue = analogRead(flameSensorAnalogPin);
+
+  // Print the raw analog value (0-4095 for 12-bit resolution)
+  Serial.print("Raw Analog Flame Value (AO): ");
+  Serial.println(flameRawValue);
+
+  // --- Interpretation of the Raw Value ---
+  // For most flame sensors with AO, the analog value:
+  //   - Increases as the flame gets closer or brighter.
+  //   - Decreases as the flame moves away or extinguishes.
+
+  // You can set a threshold for "flame detected" based on observation.
+  // These values are examples and will need tuning for your specific setup and environment.
+  const int flameThreshold = 1000; // Example threshold, adjust this!
+
+  if (flameRawValue > flameThreshold) {
+    Serial.println(">>> Potential Flame / Strong IR Source Detected <<<");
+    // Add actions here, e.g., trigger an alarm, log event, etc.
+  } else {
+    Serial.println("No significant flame detected.");
+  }
+
+  Serial.println(); // Add a blank line for readability
+  delay(200);       // Wait for 200 milliseconds before the next reading (flame detection can be faster)
+}
