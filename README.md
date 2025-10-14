@@ -1,13 +1,61 @@
-# Autonomous-Greenhouse
- This project delivers a Resilient, Low-Cost Greenhouse Climate Control and Monitoring Solution explicitly engineered for the unique operational challenges within the South African agricultural sector, particularly mitigating risks associated with load shedding, water scarcity, and climate volatility. 
+# Autonomous-Greenhouse 🌿
+ This project delivers a Resilient, Low-Cost Greenhouse Climate Control and Monitoring Solution explicitly engineered for the unique operational challenges within the South African agricultural sector, particularly mitigating risks associated with **seasonal fires, load shedding, water scarcity, and climate volatility**. 
 
-✨ Core Resilience Features
-The system is optimized for operational continuity and resource efficiency, which are critical necessities for local producers:
 
-Load Shedding Resilience (Power Autonomy): The NodeMCU utilizes Deep Sleep Mode (GPIO16→RST) to run on an extremely low duty cycle, minimizing power consumption to micro-amps. This strategy ensures the system maintains continuous monitoring and survives rotational power cuts, combating the 30%–50% losses reported by farmers due to energy disruption.   
+---
 
-Precision Water Management: It calculates the Vapor Pressure Deficit (VPD) based on DHT22 data. VPD is a superior agronomic metric that quantifies plant water stress, enabling precise, targeted irrigation and resource conservation, which is vital given projected increases in irrigation demand.   
+## ✨ Core Resilience Features
 
-Local Safety Fail-Safe: A hardwired Emergency Button is connected via an interrupt, providing a crucial manual override. This ensures immediate local control (e.g., forcing a fan ON via the Relay Module) even if the network fails, guaranteeing critical protective actions are executed.
+### ⚡ Load Shedding Resilience (Power Autonomy)
+- The **NodeMCU** utilizes **Deep Sleep Mode (GPIO16→RST)**, reducing power draw to micro-amps.
+- Enables **continuous monitoring** during power outages.
+- Helps mitigate **30%–50% agricultural losses** linked to energy disruptions.
 
-Cost-Effective Gas Safety: The system employs firmware-assisted rough calibration for the MQ gas sensors (e.g., MQ7 for CO). This allows the system to accurately provide critical safety alerts without the prohibitive cost of professional calibration (150 or more per device).
+### 💧 Precision Water Management
+- Calculates **Vapor Pressure Deficit (VPD)** using **DHT22 sensor data**.
+- Enables **targeted irrigation** by quantifying plant water stress.
+- Promotes **sustainable water usage** in response to rising irrigation demands.
+
+### 🛑 Local Safety Fail-Safe
+- Includes a **hardwired Emergency Button** (via interrupt) allowing **manual override** of automated systems.
+- Ensures **local control** (e.g., forcing fan ON via Relay Module) even when network connectivity fails.
+
+### 🔥 Fire and Hazard Detection
+- Integrates a **Flame Sensor** for early fire detection, crucial for **Cape Town’s dry-season risk zones**.
+- Automatically triggers **buzzer alerts** and **relay-based responses** to safeguard greenhouse environments.
+
+### 🧪 Cost-Effective Gas Safety
+- Employs **firmware-assisted rough calibration** for MQ-series gas sensors (e.g., **MQ7 for CO**).
+- Provides accurate **gas safety alerts** without the need for costly professional calibration (~R150 per sensor).
+
+### 🔔 Real-Time Audible Alerts
+- A **Buzzer Module** emits alerts when temperature, humidity, CO levels, or fire readings exceed **critical thresholds**.
+- Ensures **farmers are promptly notified** even during power or network interruptions.
+
+---
+
+## 🔄 System Overview
+
+1. **Sensors** continuously collect temperature, humidity, gas, and fire data.  
+2. The **NodeMCU** processes readings, calculates VPD, and checks threshold conditions.  
+3. **Alerts** are issued via buzzer, and **actuators** (fans, relays) are triggered as needed.  
+4. Data can be transmitted to a **cloud or local dashboard** for visualization and control.  
+5. **Deep Sleep Mode** conserves energy between monitoring cycles.
+
+---
+
+## 👥 Dev Team
+
+Developed by:  
+**Ismail Abrahams**, **Alyssa Jordan Krishna**, **Stacey Rosenburg**, **Xavier Jeniker**, **Griffiths Moshoeshoe**, and **Enrique Thomas**
+
+---
+
+## 🙏 Acknowledgment
+
+Special thanks to **Lecturer Ruchen Wyngaard** for continuous guidance, mentorship, and for providing the project brief.
+
+---
+
+> 🌱 *Empowering sustainable agriculture through resilient, low-cost IoT innovation.*
+
