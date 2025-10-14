@@ -1,26 +1,19 @@
 const int mq2AnalogPin = 34; // Connect the AO pin of your MQ2 module to ESP32 GPIO34
 
-// --- VOLTAGE DIVIDER CONFIGURATION ---
+// --- IMPORTANT: VOLTAGE DIVIDER REQUIRED ---
 // MQ2 outputs 0-5V, but ESP32 ADC can only handle 0-3.3V
-// Use a voltage divider: Two resistors (e.g., R1=10kΩ to GND, R2=4.7kΩ from sensor to R1)
-// This scales 5V down to ~3.3V maximum
+// Use a voltage divider to scale down the voltage
 // 
 // Connection:
-// MQ2 AO ----[R2: 4.7kΩ]---- ESP32 GPIO34 ----[R1: 10kΩ]---- GND
+// MQ2 AO ----[4.7kΩ]---- ESP32 GPIO34 ----[10kΩ]---- GND
 //
-// Voltage division ratio: 3.3V / 5V = 0.66
-const float VOLTAGE_DIVIDER_RATIO = 0.66; // Adjust based on your actual resistor values
-const float ESP32_ADC_MAX = 4095.0;       // 12-bit ADC
-const float ESP32_VREF = 3.3;             // ESP32 reference voltage
 
-// --- Calibration Variables (adjusted for 5V sensor with voltage divider) ---
+// --- Calibration Variables ---
 int cleanAirBaseline = 0;       // Analog value in genuinely clean air
 const int baselineBuffer = 300; // Allow for normal fluctuations
-                                // Increased from 200 due to potentially more noise with 5V sensor
 
 // Thresholds are DIFFERENTIAL from the baseline.
 // These represent how much the reading needs to *drop* from the baseline to trigger.
-// Adjusted for 5V sensor (values will be higher due to voltage range)
 const int warningDropThreshold = 750;  // Reading must drop by at least 750 from baseline for warning
 const int alarmDropThreshold = 1500;   // Reading must drop by at least 1500 from baseline for alarm
 
@@ -29,8 +22,7 @@ void setup() {
   Serial.println("MQ2 Gas Sensor (LPG) - 5V Analog Output with Voltage Divider");
   Serial.println("----------------------------------------------");
   Serial.println(">>> CRITICAL: MQ2 Sensor Extended Pre-heating & Baseline Calibration <<<");
-  Serial.println(">>> HARDWARE SETUP REQUIRED: <<<");
-  Serial.println(">>> Connect voltage divider: MQ2 AO --[4.7kΩ]-- GPIO34 --[10kΩ]-- GND <<<");
+  Serial.println(">>> HARDWARE: Connect voltage divider: MQ2 AO --[4.7kΩ]-- GPIO34 --[10kΩ]-- GND <<<");
   Serial.println("Place sensor in a genuinely CLEAN AIR environment.");
   Serial.println("Allow at least 5 MINUTES for the sensor to warm up for stable readings.");
   Serial.println("Do NOT introduce any gas or smoke during this phase.");
@@ -53,18 +45,8 @@ void setup() {
   }
   cleanAirBaseline = sumReadings / 200;
   
-  // Calculate actual voltage for reference
-  float baselineVoltageAtPin = (cleanAirBaseline / ESP32_ADC_MAX) * ESP32_VREF;
-  float actualSensorVoltage = baselineVoltageAtPin / VOLTAGE_DIVIDER_RATIO;
-  
-  Serial.print("FINAL Clean Air Baseline (ADC value): ");
+  Serial.print("FINAL Clean Air Baseline: ");
   Serial.println(cleanAirBaseline);
-  Serial.print("Voltage at ESP32 pin: ");
-  Serial.print(baselineVoltageAtPin, 2);
-  Serial.println("V");
-  Serial.print("Actual MQ2 sensor voltage (before divider): ");
-  Serial.print(actualSensorVoltage, 2);
-  Serial.println("V");
   Serial.print("Baseline Buffer: +/- ");
   Serial.println(baselineBuffer);
   Serial.println("----------------------------------------------");
@@ -75,30 +57,17 @@ void setup() {
 void loop() {
   int gasRawValue = analogRead(mq2AnalogPin);
   
-  // Calculate voltages
-  float voltageAtPin = (gasRawValue / ESP32_ADC_MAX) * ESP32_VREF;
-  float actualSensorVoltage = voltageAtPin / VOLTAGE_DIVIDER_RATIO;
-  
-  Serial.print("Current Gas Raw Value (ADC): ");
-  Serial.print(gasRawValue);
-  Serial.print(" | ESP32 Pin Voltage: ");
-  Serial.print(voltageAtPin, 2);
-  Serial.print("V | Actual Sensor Voltage: ");
-  Serial.print(actualSensorVoltage, 2);
-  Serial.println("V");
+  Serial.print("Current Gas Value: ");
+  Serial.println(gasRawValue);
 
   // Calculate the difference from the clean air baseline
   int dropFromBaseline = cleanAirBaseline - gasRawValue;
 
   Serial.print("Drop from Baseline: ");
-  Serial.print(dropFromBaseline);
-  Serial.print(" (");
-  Serial.print((dropFromBaseline * 100.0) / cleanAirBaseline, 1);
-  Serial.println("%)");
+  Serial.println(dropFromBaseline);
 
-  // --- INTERPRETATION LOGIC with FIRMER THRESHOLDS ---
+  // --- INTERPRETATION LOGIC ---
   // If the sensor value *drops* significantly from the baseline, it means gas is detected.
-  // We also need to ignore small fluctuations within our 'baselineBuffer'.
 
   if (dropFromBaseline > alarmDropThreshold) {
     Serial.println("!!! DANGEROUS GAS LEAK DETECTED (CRITICAL ALARM) !!!");
@@ -106,7 +75,7 @@ void loop() {
   } else if (dropFromBaseline > warningDropThreshold) {
     Serial.println(">> Warning: Elevated Gas Concentration Detected <<");
     // Actions: Send mild notification, activate ventilation fan, log event.
-  } else if (dropFromBaseline > baselineBuffer) { // Detected a noticeable drop, but not yet warning level
+  } else if (dropFromBaseline > baselineBuffer) {
      Serial.println("Slight increase in gas detected (above normal fluctuation).");
      // Actions: Log for trend analysis, subtle indication.
   }
