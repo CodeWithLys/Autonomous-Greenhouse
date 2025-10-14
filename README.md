@@ -3,7 +3,7 @@
 
 
 
-## ✨ Core Resilience Features
+##  Core Resilience Features
 
 ### ⚡ Load Shedding Resilience (Power Autonomy)
 - The **NodeMCU** utilizes **Deep Sleep Mode (GPIO16→RST)**, reducing power draw to micro-amps.
@@ -32,7 +32,7 @@
 - Ensures **farmers are promptly notified** even during power or network interruptions.
 
 
-## 🔄 System Overview
+##  System Overview
 
 1. **Sensors** continuously collect temperature, humidity, gas, and fire data.  
 2. The **NodeMCU** processes readings, calculates VPD, and checks threshold conditions.  
@@ -47,7 +47,7 @@ Developed by:
 **Ismail Abrahams**, **Alyssa Jordan Krishna**, **Stacey Rosenburg**, **Xavier Jeniker**, **Griffiths Moshoeshoe**, and **Enrique Thomas**
 
 
-## 🙏 Acknowledgment
+##  Acknowledgment
 
 Special thanks to **Lecturer Ruchen Wyngaard** for continuous guidance, mentorship, and for providing the project brief.
 
