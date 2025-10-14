@@ -2,7 +2,6 @@
  This project delivers a Resilient, Low-Cost Greenhouse Climate Control and Monitoring Solution explicitly engineered for the unique operational challenges within the South African agricultural sector, particularly mitigating risks associated with **seasonal fires, load shedding, water scarcity, and climate volatility**. 
 
 
----
 
 ## ✨ Core Resilience Features
 
@@ -32,7 +31,6 @@
 - A **Buzzer Module** emits alerts when temperature, humidity, CO levels, or fire readings exceed **critical thresholds**.
 - Ensures **farmers are promptly notified** even during power or network interruptions.
 
----
 
 ## 🔄 System Overview
 
@@ -42,14 +40,12 @@
 4. Data can be transmitted to a **cloud or local dashboard** for visualization and control.  
 5. **Deep Sleep Mode** conserves energy between monitoring cycles.
 
----
 
 ## 👥 Dev Team
 
 Developed by:  
 **Ismail Abrahams**, **Alyssa Jordan Krishna**, **Stacey Rosenburg**, **Xavier Jeniker**, **Griffiths Moshoeshoe**, and **Enrique Thomas**
 
----
 
 ## 🙏 Acknowledgment
 
