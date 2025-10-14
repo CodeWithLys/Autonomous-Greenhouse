@@ -1,75 +1,66 @@
 /*
- * MULTI-SENSOR GREENHOUSE CLIMATE MONITORING SYSTEM
- * For Greenhouse Climate Monitoring - Group 4
- * IFS325 IoT Project - ARC Greenhouse
+ * GREENHOUSE CLIMATE MONITORING SYSTEM - PROFESSIONAL OUTPUT
+ * ARC Greenhouse Project - Group 4 IFS325
  * 
- * Sensors: MQ-2 (Smoke/LPG), MQ-5 (Natural Gas), MQ-7 (CO), MQ-135 (Air Quality)
- * 
- * SYNCHRONIZED HEATING CYCLES FOR MQ2 & MQ5 (Both heat at same time)
- * Readings every 10 seconds
- * LED Alert on GPIO 2
+ * Sensors: MQ-2 (Smoke/Flammable Gas), MQ-5 (LPG/Natural Gas), 
+ *          MQ-7 (Carbon Monoxide), MQ-135 (Air Quality)
  */
 
 // ===== PIN DEFINITIONS =====
-const int LED_PIN = 2;            // Built-in LED for alerts (HIGH = danger detected)
+const int LED_PIN = 2;
+const int MQ2_AOUT_PIN = 32;      // Smoke/Flammable Gas (with voltage divider)
+const int MQ5_AOUT_PIN = 34;      // LPG/Natural Gas
+const int MQ7_AOUT_PIN = 35;      // Carbon Monoxide (CO)
+const int MQ135_AOUT_PIN = 33;    // Air Quality (CO2 equivalent)
 
-// MQ-2 Sensor (Smoke/LPG Detector)
-const int MQ2_AOUT_PIN = 32;      // Analog input for MQ-2
-
-// MQ-5 Sensor (Natural Gas/LPG)
-const int MQ5_AOUT_PIN = 34;      // Analog input for MQ-5
-
-// MQ-7 Sensor (Carbon Monoxide)
-const int MQ7_AOUT_PIN = 35;      // Analog input for MQ-7
-
-// MQ-135 Sensor (Air Quality/Hazardous Gases)
-const int MQ135_AOUT_PIN = 33;    // Analog input for MQ-135
-
-// ===== HEATING CYCLE PARAMETERS (MQ2 & MQ5) =====
-const int HEATING_TIME = 90;      // Heating duration (seconds) - synchronized
-const int MEASUREMENT_TIME = 45;  // Measurement duration (seconds) - synchronized
+// ===== HEATING CYCLE =====
+const int HEATING_TIME = 90;
+const int MEASUREMENT_TIME = 45;
 boolean isHeatingPhase = true;
 unsigned long heatingCycleStart = 0;
 unsigned long lastHeatingMessage = 0;
 
-// ===== SENSOR BASELINES (Dynamically calibrated) =====
-int MQ2_BASELINE = 0;
+// ===== SENSOR CALIBRATION =====
+float MQ2_R0 = 0;
+float MQ5_R0 = 0;
+float MQ7_R0 = 0;
+float MQ135_R0 = 0;
+
 boolean MQ2_CALIBRATED = false;
-
-int MQ5_BASELINE = 0;
 boolean MQ5_CALIBRATED = false;
-
-int MQ7_BASELINE = 0;
 boolean MQ7_CALIBRATED = false;
-
-int MQ135_BASELINE = 0;
 boolean MQ135_CALIBRATED = false;
 
-// ===== SENSOR THRESHOLDS (% change from baseline) =====
-const float MQ2_WARNING_PERCENT = 20.0;   // 20% change = warning
-const float MQ2_DANGER_PERCENT = 50.0;    // 50% change = danger
+// ===== ALERT THRESHOLDS (PPM or equivalent) =====
+// MQ-2: Smoke/Flammable Gas
+const float MQ2_WARNING_PPM = 300;
+const float MQ2_DANGER_PPM = 500;
 
-const float MQ5_WARNING_PERCENT = 20.0;   
-const float MQ5_DANGER_PERCENT = 50.0;    
+// MQ-5: LPG/Natural Gas
+const float MQ5_WARNING_PPM = 600;
+const float MQ5_DANGER_PPM = 1000;
 
-const float MQ7_WARNING_PERCENT = 20.0;   
-const float MQ7_DANGER_PERCENT = 50.0;    
+// MQ-7: Carbon Monoxide
+const float MQ7_WARNING_PPM = 35;
+const float MQ7_DANGER_PPM = 100;
 
-const float MQ135_WARNING_PERCENT = 15.0; 
-const float MQ135_DANGER_PERCENT = 30.0;  
+// MQ-135: Air Quality (CO2 equivalent ppm)
+const float MQ135_WARNING_PPM = 1000;
+const float MQ135_DANGER_PPM = 1500;
 
 // ===== TIMING =====
 unsigned long lastReadingTime = 0;
-const long READING_INTERVAL = 10000;  // 10 seconds between readings
+const long READING_INTERVAL = 10000;
 
-// ===== ALERT STATE =====
+// ===== ALERT TRACKING =====
+boolean warningDetected = false;
 boolean dangerDetected = false;
+String alertSensors = "";
 
 void setup() {
   Serial.begin(115200);
   delay(100);
   
-  // Configure all pins
   pinMode(LED_PIN, OUTPUT);
   pinMode(MQ2_AOUT_PIN, INPUT);
   pinMode(MQ5_AOUT_PIN, INPUT);
@@ -78,79 +69,64 @@ void setup() {
   
   digitalWrite(LED_PIN, LOW);
   
-  // Welcome message
+  // Header
   Serial.println("\n\n");
-  Serial.println("╔════════════════════════════════════════════════╗");
-  Serial.println("║ GREENHOUSE CLIMATE MONITORING SYSTEM           ║");
-  Serial.println("║ Multi-Sensor IoT Solution - Group 4 IFS325     ║");
-  Serial.println("║ 4 Gas Sensors with Dynamic Calibration         ║");
-  Serial.println("╚════════════════════════════════════════════════╝");
-  Serial.println();
+  Serial.println("╔═══════════════════════════════════════════════════════════╗");
+  Serial.println("║         ARC GREENHOUSE CLIMATE MONITORING SYSTEM           ║");
+  Serial.println("║              IoT Environmental Control System              ║");
+  Serial.println("╚═══════════════════════════════════════════════════════════╝\n");
   
-  Serial.println("SENSOR INFORMATION:");
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  Serial.println("✓ MQ-2: Smoke/LPG Detection (GPIO32)");
-  Serial.println("✓ MQ-5: Natural Gas/LPG Detection (GPIO34)");
-  Serial.println("✓ MQ-7: Carbon Monoxide Detection (GPIO35)");
-  Serial.println("✓ MQ-135: Air Quality/Hazardous Gases (GPIO33)");
-  Serial.println();
+  Serial.println("SYSTEM CONFIGURATION:");
+  Serial.println("───────────────────────────────────────────────────────────");
+  Serial.println("Sensor 1: MQ-2   → Smoke/Flammable Gas Detection");
+  Serial.println("Sensor 2: MQ-5   → LPG/Natural Gas Detection");
+  Serial.println("Sensor 3: MQ-7   → Carbon Monoxide (CO) Detection");
+  Serial.println("Sensor 4: MQ-135 → Air Quality/CO2 Equivalent Monitoring");
+  Serial.println("Alert LED: GPIO 2 (Built-in)\n");
   
-  Serial.println("HEATING CYCLE SCHEDULE:");
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  Serial.println("Phase 1: MQ-2 & MQ-5 HEATING (90 seconds)");
-  Serial.println("Phase 2: ALL SENSORS MEASURING (45 seconds)");
-  Serial.println("Phase 3: CYCLE REPEATS");
-  Serial.println();
+  Serial.println("OPERATIONAL CYCLE:");
+  Serial.println("───────────────────────────────────────────────────────────");
+  Serial.println("Phase 1: Sensor Heating        | Duration: 90 seconds");
+  Serial.println("Phase 2: Sensor Calibration    | Automatic (first reading)");
+  Serial.println("Phase 3: Active Monitoring     | Readings every 10 seconds");
+  Serial.println("Phase 4: Cycle Restart         | After 45 seconds of Phase 3\n");
   
-  Serial.println("CALIBRATION WILL START AFTER HEATING...");
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  Serial.println("INITIATING STARTUP SEQUENCE...");
+  Serial.println("═══════════════════════════════════════════════════════════\n");
   
-  // Begin heating cycle
   heatingCycleStart = millis();
   isHeatingPhase = true;
-  lastHeatingMessage = 0;
-  
-  Serial.println("MQ-2 & MQ-5: HEATING PHASE (90 seconds)");
-  Serial.println("Do NOT introduce any gases during heating!");
-  Serial.println();
 }
 
 void loop() {
   unsigned long currentTime = millis();
-  unsigned long elapsedTime = (currentTime - heatingCycleStart) / 1000; // seconds
+  unsigned long elapsedTime = (currentTime - heatingCycleStart) / 1000;
   
-  // ===== SYNCHRONIZED HEATING CYCLE MANAGEMENT =====
+  // ===== HEATING PHASE =====
   if (isHeatingPhase) {
     if (elapsedTime < HEATING_TIME) {
-      // Still heating - show countdown every 10 seconds
-      unsigned long timeSinceLastMessage = (currentTime - lastHeatingMessage) / 1000;
-      if (timeSinceLastMessage >= 10 && elapsedTime > 0) {
-        Serial.print("[HEATING] ");
+      if ((currentTime - lastHeatingMessage) >= 10000) {
+        Serial.print("[HEATING] MQ-2 & MQ-5 warming up... ");
         Serial.print(HEATING_TIME - elapsedTime);
-        Serial.println("s remaining...");
+        Serial.println("s remaining");
         lastHeatingMessage = currentTime;
       }
-      return; // Exit loop, don't take readings
+      return;
     } else {
-      // Heating complete, switch to measurement
-      Serial.println("\n✓ HEATING COMPLETE - SWITCHING TO MEASUREMENT MODE");
-      Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+      Serial.println("\n✓ Sensors warmed up - Beginning calibration & measurement\n");
       isHeatingPhase = false;
-      heatingCycleStart = millis(); // Reset timer for measurement phase
-      lastReadingTime = 0; // Force immediate first reading
+      heatingCycleStart = millis();
+      lastReadingTime = 0;
       return;
     }
   }
   
   // ===== MEASUREMENT PHASE =====
   if (elapsedTime >= MEASUREMENT_TIME) {
-    // Measurement phase complete, restart cycle
-    Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    Serial.println("✓ MEASUREMENT PHASE COMPLETE - RESTARTING CYCLE");
-    Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    Serial.println("\n───────────────────────────────────────────────────────────");
+    Serial.println("Measurement cycle complete. Restarting heating phase...\n");
     isHeatingPhase = true;
     heatingCycleStart = millis();
-    lastHeatingMessage = 0;
     return;
   }
   
@@ -158,186 +134,214 @@ void loop() {
   if (currentTime - lastReadingTime >= READING_INTERVAL) {
     lastReadingTime = currentTime;
     
+    warningDetected = false;
     dangerDetected = false;
+    alertSensors = "";
     
-    Serial.println("\n┌─ SENSOR READING ─────────────────────────────┐");
+    // Print timestamp
+    Serial.print("[");
+    Serial.print(elapsedTime);
+    Serial.println("s] ENVIRONMENTAL READING");
+    Serial.println("───────────────────────────────────────────────────────────");
     
-    // Read MQ-2 (Smoke/LPG)
-    readMQ2Sensor();
+    // Read all sensors
+    readMQ2();
+    readMQ5();
+    readMQ7();
+    readMQ135();
     
-    // Read MQ-5 (Natural Gas)
-    readMQ5Sensor();
+    Serial.println("───────────────────────────────────────────────────────────");
     
-    // Read MQ-7 (Carbon Monoxide)
-    readMQ7Sensor();
+    // Print system summary
+    printSystemSummary();
     
-    // Read MQ-135 (Air Quality)
-    readMQ135Sensor();
-    
-    Serial.println("└───────────────────────────────────────────────┘");
-    
-    // ===== ALERT SYSTEM =====
+    // Alert system
     if (dangerDetected) {
-      Serial.println("\n⚠️  DANGER ALERT DETECTED - LED ACTIVATED");
       digitalWrite(LED_PIN, HIGH);
-      delay(500);
+      delay(300);
       digitalWrite(LED_PIN, LOW);
-      delay(500);
+      delay(300);
+    } else if (warningDetected) {
+      digitalWrite(LED_PIN, HIGH);
+      delay(100);
+      digitalWrite(LED_PIN, LOW);
     } else {
-      Serial.println("\n✓ All sensors within safe parameters");
       digitalWrite(LED_PIN, LOW);
     }
+    
+    Serial.println();
   }
 }
 
-// ===== MQ-2 SENSOR READING FUNCTION =====
-void readMQ2Sensor() {
+// ===== MQ-2 SENSOR (Smoke/Flammable Gas) =====
+void readMQ2() {
   int rawValue = analogRead(MQ2_AOUT_PIN);
   float voltage = rawValue * (3.3 / 4095.0);
+  float Rs = calculateRs(voltage, 3.3);
   
   if (!MQ2_CALIBRATED) {
-    MQ2_BASELINE = rawValue;
+    MQ2_R0 = Rs / 9.83;  // MQ-2 calibration factor for clean air
     MQ2_CALIBRATED = true;
-    Serial.print("MQ-2 (Smoke/LPG): CALIBRATING... Baseline=");
-    Serial.print(MQ2_BASELINE);
-    Serial.print(" (");
-    Serial.print(voltage, 2);
-    Serial.println("V) [Calibration done]");
+    Serial.println("MQ-2 (Smoke/Flammable Gas): CALIBRATING...");
+    Serial.print("  Baseline: ");
+    Serial.print(MQ2_R0, 2);
+    Serial.println(" kΩ [READY]");
     return;
   }
   
-  float percentChange = abs(((float)(rawValue - MQ2_BASELINE) / MQ2_BASELINE) * 100.0);
+  float ratio = Rs / MQ2_R0;
+  float ppm = 116.6 * pow(ratio, -2.769);  // MQ-2 characteristic curve
+  ppm = max(0.0f, ppm);  // Prevent negative values
   
-  Serial.print("MQ-2 (Smoke/LPG): Raw=");
-  Serial.print(rawValue);
-  Serial.print(" V=");
-  Serial.print(voltage, 2);
-  Serial.print("V Change=");
-  Serial.print(percentChange, 1);
-  Serial.print("%");
+  Serial.print("MQ-2 (Smoke/Flammable Gas): ");
+  Serial.print(ppm, 1);
+  Serial.print(" ppm");
   
-  if (percentChange > MQ2_DANGER_PERCENT) {
-    Serial.println(" [🚨 CRITICAL DANGER]");
+  if (ppm > MQ2_DANGER_PPM) {
+    Serial.println(" [DANGER - TOXIC LEVELS]");
     dangerDetected = true;
-  } else if (percentChange > MQ2_WARNING_PERCENT) {
-    Serial.println(" [⚠️  WARNING]");
+    alertSensors += "Smoke/Gas ";
+  } else if (ppm > MQ2_WARNING_PPM) {
+    Serial.println(" [WARNING - Elevated]");
+    warningDetected = true;
+    alertSensors += "Smoke/Gas ";
   } else {
-    Serial.println(" [✓ SAFE]");
+    Serial.println(" [SAFE]");
   }
 }
 
-// ===== MQ-5 SENSOR READING FUNCTION =====
-void readMQ5Sensor() {
+// ===== MQ-5 SENSOR (LPG/Natural Gas) =====
+void readMQ5() {
   int rawValue = analogRead(MQ5_AOUT_PIN);
   float voltage = rawValue * (3.3 / 4095.0);
+  float Rs = calculateRs(voltage, 3.3);
   
   if (!MQ5_CALIBRATED) {
-    MQ5_BASELINE = rawValue;
+    MQ5_R0 = Rs / 6.5;  // MQ-5 calibration factor for clean air
     MQ5_CALIBRATED = true;
-    Serial.print("MQ-5 (Natural Gas): CALIBRATING... Baseline=");
-    Serial.print(MQ5_BASELINE);
-    Serial.print(" (");
-    Serial.print(voltage, 2);
-    Serial.println("V) [Calibration done]");
+    Serial.println("MQ-5 (LPG/Natural Gas): CALIBRATING...");
+    Serial.print("  Baseline: ");
+    Serial.print(MQ5_R0, 2);
+    Serial.println(" kΩ [READY]");
     return;
   }
   
-  float percentChange = abs(((float)(rawValue - MQ5_BASELINE) / MQ5_BASELINE) * 100.0);
+  float ratio = Rs / MQ5_R0;
+  float ppm = 116.6 * pow(ratio, -2.789);  // MQ-5 characteristic curve
+  ppm = max(0.0f, ppm);
   
-  Serial.print("MQ-5 (Natural Gas): Raw=");
-  Serial.print(rawValue);
-  Serial.print(" V=");
-  Serial.print(voltage, 2);
-  Serial.print("V Change=");
-  Serial.print(percentChange, 1);
-  Serial.print("%");
+  Serial.print("MQ-5 (LPG/Natural Gas): ");
+  Serial.print(ppm, 1);
+  Serial.print(" ppm");
   
-  if (percentChange > MQ5_DANGER_PERCENT) {
-    Serial.println(" [🚨 CRITICAL DANGER]");
+  if (ppm > MQ5_DANGER_PPM) {
+    Serial.println(" [DANGER - GAS LEAK]");
     dangerDetected = true;
-  } else if (percentChange > MQ5_WARNING_PERCENT) {
-    Serial.println(" [⚠️  WARNING]");
+    alertSensors += "Gas-Leak ";
+  } else if (ppm > MQ5_WARNING_PPM) {
+    Serial.println(" [WARNING - Elevated]");
+    warningDetected = true;
+    alertSensors += "Gas-Level ";
   } else {
-    Serial.println(" [✓ SAFE]");
+    Serial.println(" [SAFE]");
   }
 }
 
-// ===== MQ-7 SENSOR READING FUNCTION =====
-void readMQ7Sensor() {
+// ===== MQ-7 SENSOR (Carbon Monoxide) =====
+void readMQ7() {
   int rawValue = analogRead(MQ7_AOUT_PIN);
   float voltage = rawValue * (3.3 / 4095.0);
+  float Rs = calculateRs(voltage, 3.3);
   
   if (!MQ7_CALIBRATED) {
-    MQ7_BASELINE = rawValue;
+    MQ7_R0 = Rs / 9.83;  // MQ-7 calibration factor for clean air
     MQ7_CALIBRATED = true;
-    Serial.print("MQ-7 (Carbon Monoxide): CALIBRATING... Baseline=");
-    Serial.print(MQ7_BASELINE);
-    Serial.print(" (");
-    Serial.print(voltage, 2);
-    Serial.println("V) [Calibration done]");
+    Serial.println("MQ-7 (Carbon Monoxide): CALIBRATING...");
+    Serial.print("  Baseline: ");
+    Serial.print(MQ7_R0, 2);
+    Serial.println(" kΩ [READY]");
     return;
   }
   
-  float percentChange = abs(((float)(rawValue - MQ7_BASELINE) / MQ7_BASELINE) * 100.0);
+  float ratio = Rs / MQ7_R0;
+  float ppm = 100.0 * pow(ratio, -1.53);  // MQ-7 characteristic curve
+  ppm = max(0.0f, ppm);
   
-  Serial.print("MQ-7 (CO): Raw=");
-  Serial.print(rawValue);
-  Serial.print(" V=");
-  Serial.print(voltage, 2);
-  Serial.print("V Change=");
-  Serial.print(percentChange, 1);
-  Serial.print("%");
+  Serial.print("MQ-7 (Carbon Monoxide): ");
+  Serial.print(ppm, 1);
+  Serial.print(" ppm");
   
-  if (percentChange > MQ7_DANGER_PERCENT) {
-    Serial.println(" [🚨 CRITICAL DANGER]");
+  if (ppm > MQ7_DANGER_PPM) {
+    Serial.println(" [DANGER - TOXIC CO LEVELS]");
     dangerDetected = true;
-  } else if (percentChange > MQ7_WARNING_PERCENT) {
-    Serial.println(" [⚠️  WARNING]");
+    alertSensors += "CO-Toxic ";
+  } else if (ppm > MQ7_WARNING_PPM) {
+    Serial.println(" [WARNING - Elevated CO]");
+    warningDetected = true;
+    alertSensors += "CO-Level ";
   } else {
-    Serial.println(" [✓ SAFE]");
+    Serial.println(" [SAFE]");
   }
 }
 
-// ===== MQ-135 SENSOR READING FUNCTION =====
-void readMQ135Sensor() {
+// ===== MQ-135 SENSOR (Air Quality) =====
+void readMQ135() {
   int rawValue = analogRead(MQ135_AOUT_PIN);
   float voltage = rawValue * (3.3 / 4095.0);
-  
-  // Check if sensor is saturated
-  if (rawValue >= 4090) {
-    Serial.print("MQ-135 (Air Quality): SATURATED (");
-    Serial.print(rawValue);
-    Serial.println(") - Check wiring/power!");
-    return;
-  }
+  float Rs = calculateRs(voltage, 3.3);
   
   if (!MQ135_CALIBRATED) {
-    MQ135_BASELINE = rawValue;
+    MQ135_R0 = Rs / 10.0;  // MQ-135 calibration factor
     MQ135_CALIBRATED = true;
-    Serial.print("MQ-135 (Air Quality): CALIBRATING... Baseline=");
-    Serial.print(MQ135_BASELINE);
-    Serial.print(" (");
-    Serial.print(voltage, 2);
-    Serial.println("V) [Calibration done]");
+    Serial.println("MQ-135 (Air Quality): CALIBRATING...");
+    Serial.print("  Baseline: ");
+    Serial.print(MQ135_R0, 2);
+    Serial.println(" kΩ [READY]");
     return;
   }
   
-  float percentChange = abs(((float)(rawValue - MQ135_BASELINE) / MQ135_BASELINE) * 100.0);
+  float ratio = Rs / MQ135_R0;
+  float ppm = 116.6 * pow(ratio, -2.56);  // MQ-135 characteristic curve
+  ppm = max(0.0f, ppm);
   
-  Serial.print("MQ-135 (Air Quality): Raw=");
-  Serial.print(rawValue);
-  Serial.print(" V=");
-  Serial.print(voltage, 2);
-  Serial.print("V Change=");
-  Serial.print(percentChange, 1);
-  Serial.print("%");
+  Serial.print("MQ-135 (Air Quality/CO2 eq.): ");
+  Serial.print(ppm, 0);
+  Serial.print(" ppm");
   
-  if (percentChange > MQ135_DANGER_PERCENT) {
-    Serial.println(" [🚨 CRITICAL DANGER]");
+  if (ppm > MQ135_DANGER_PPM) {
+    Serial.println(" [DANGER - Poor Air Quality]");
     dangerDetected = true;
-  } else if (percentChange > MQ135_WARNING_PERCENT) {
-    Serial.println(" [⚠️  WARNING]");
+    alertSensors += "AirQuality ";
+  } else if (ppm > MQ135_WARNING_PPM) {
+    Serial.println(" [WARNING - Monitor Air]");
+    warningDetected = true;
+    alertSensors += "AirQuality ";
   } else {
-    Serial.println(" [✓ SAFE]");
+    Serial.println(" [SAFE]");
   }
+}
+
+// ===== SYSTEM SUMMARY =====
+void printSystemSummary() {
+  Serial.print("SYSTEM STATUS: ");
+  
+  if (dangerDetected) {
+    Serial.print("[CRITICAL ALERT] ");
+    Serial.println(alertSensors);
+    Serial.println("ACTION: Activate emergency ventilation. Check equipment.");
+  } else if (warningDetected) {
+    Serial.print("[WARNING] ");
+    Serial.println(alertSensors);
+    Serial.println("ACTION: Monitor levels. Increase ventilation if needed.");
+  } else {
+    Serial.println("[NORMAL OPERATION] All parameters within safe limits");
+  }
+}
+
+// ===== HELPER FUNCTION: Calculate Sensor Resistance =====
+float calculateRs(float voltage, float refVoltage) {
+  if (voltage == 0) return 0;
+  float Vc = refVoltage - voltage;
+  const int RL_VALUE = 10;  // Load resistance (kΩ)
+  return (Vc / voltage) * RL_VALUE;
 }
