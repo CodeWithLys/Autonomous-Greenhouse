@@ -1,0 +1,446 @@
+// ============================================================================
+// GREENHOUSE SENSOR JSON PAYLOAD STRUCTURES
+// IFS325 Group 4 - ARC Smart Agriculture
+// 
+// IMPORTANT FOR BACKEND TEAM:
+//- THERE ARE 2 SEPERATE PAYLOADS incase MQ5 doesnt work. 
+// - Raw sensor data is sent as-is (no preprocessing)
+// - Backend will split into separate database tables
+// - All timestamps in ISO8601 format (UTC timezone)
+// - All gas readings in PPM (parts per million)
+// - Backend will perform analysis for RAG AI recommendations
+// ============================================================================
+
+// ============================================================================
+// PAYLOAD 1: PRIMARY SENSORS
+// (BMP280, HKD Flame Sensor, LDR Ambient Light, DHT22, MQ-135, MQ-2, MQ-7)
+// ============================================================================
+// Send this every 10 seconds during normal operation
+// Endpoint: POST /api/greenhouse/data/main
+{
+  "device_id": "greenhouse_esp32_01",
+  "timestamp": "2025-10-15T22:45:00Z",
+  
+  // ===== TEMPERATURE & HUMIDITY (DHT22) =====
+  // DHT22 sensor - primary source for greenhouse climate control
+  // Temperature in Celsius
+  // Range: -40 to +80°C (practical: -10 to +50°C)
+  "temperature_dht22_celsius": 25.6,
+  
+  // Relative humidity in percentage
+  // Range: 0-100%
+  // Used for: Irrigation timing, disease prevention (fungal growth at high humidity)
+  "humidity_percent": 63.5,
+  
+  // ===== PRESSURE (BMP280) =====
+  // Barometric pressure in hectoPascals (hPa)
+  // Standard sea level: 1013.25 hPa
+  // Used for: Weather prediction, system diagnostics, crop physiological response
+  "pressure_hpa": 1011.8,
+  
+  // Temperature from BMP280 in Celsius
+  // Secondary temperature measurement for validation/redundancy
+  "temperature_bmp280_celsius": 25.2,
+  
+  // ===== FLAME DETECTION (HKD Flame Sensor) =====
+  // Detects infrared radiation from open flame/fire
+  // true = flame detected (CRITICAL - emergency alert)
+  // false = no flame
+  // Used for: Fire prevention, emergency shutdown, ventilation override
+  "flame_detected": false,
+  
+  // Raw digital output from flame sensor
+  // 0 = no flame, 1 = flame detected
+  "flame_sensor_digital": 0,
+  
+  // Analog reading from flame sensor (0-4095, 12-bit ADC)
+  // Higher values = more intense IR radiation
+  // Useful for: Sensitivity tuning, trend analysis
+  "flame_sensor_analog": 50,
+  
+  // ===== AMBIENT LIGHT (LDR - Light Dependent Resistor) =====
+  // Light intensity measurement in ADC units (0-4095)
+  // 0 = complete darkness
+  // 4095 = brightest light
+  // Used for: Growth light scheduling, natural light monitoring, circadian rhythm control
+  "ambient_light_ldr_adc": 1800,
+  
+  // Light intensity in approximate lux (conversion from ADC)
+  // Lux is standard light measurement unit
+  // Used for: Photosynthesis optimization, grow light scheduling
+  "ambient_light_lux_estimate": 1200,
+  
+  // ===== AIR QUALITY (MQ-135) =====
+  // CO2 equivalent concentration in PPM (parts per million)
+  // Outdoor baseline: ~400 ppm
+  // Greenhouse optimal: 800-1200 ppm (for plant growth)
+  // WARNING threshold: >1000 ppm
+  // DANGER threshold: >1500 ppm
+  // Used for: CO2 enrichment control, ventilation triggering
+  "gas_mq135_co2_equivalent_ppm": 210,
+  
+  // Raw ADC value from MQ-135 (0-4095)
+  // Useful for: Debugging, trend analysis over time
+  "gas_mq135_raw_adc": 850,
+  
+  // ===== SMOKE/FLAMMABLE GAS (MQ-2) =====
+  // Smoke and flammable gas concentration in PPM
+  // Detects: Smoke, methane, butane, propane, alcohol vapor
+  // WARNING threshold: >300 ppm
+  // DANGER threshold: >500 ppm
+  // Used for: Fire/gas leak detection, emergency alerts
+  "gas_mq2_smoke_lpg_ppm": 180,
+  
+  // Raw ADC value from MQ-2 (0-4095)
+  // Useful for: Debugging, sensor health monitoring
+  "gas_mq2_raw_adc": 920,
+  
+  // ===== CARBON MONOXIDE (MQ-7) =====
+  // Carbon monoxide concentration in PPM
+  // CRITICAL: CO is odorless and deadly
+  // WARNING threshold: >35 ppm (OSHA 8-hour limit is 50 ppm)
+  // DANGER threshold: >100 ppm (immediate threat)
+  // Used for: Poisoning prevention, emergency ventilation, heater diagnostics
+  "gas_mq7_carbon_monoxide_ppm": 15,
+  
+  // Raw ADC value from MQ-7 (0-4095)
+  // Useful for: Debugging, early warning trend detection
+  "gas_mq7_raw_adc": 780,
+  
+  // ===== SENSOR STATUS =====
+  // Indicates if all sensors have completed calibration
+  // true = all sensors calibrated and working normally
+  // false = calibration pending or sensor error detected
+  "sensors_calibrated": true,
+  
+  // System uptime in seconds since last boot
+  // Useful for: Detecting frequent reboots (hardware issues), maintenance scheduling
+  "uptime_seconds": 3600,
+  
+  // WiFi signal strength in dBm
+  // Range: -100 (weak) to 0 (excellent)
+  // -45 = good connection, >-70 = acceptable
+  // Used for: Network diagnostics, connection reliability
+  "wifi_signal_dbm": -45
+}
+
+// ============================================================================
+// PAYLOAD 2: MQ-5 NATURAL GAS/LPG SENSOR ONLY
+// ============================================================================
+// Send this every 10 seconds during normal operation (MEASUREMENT phase only)
+// Endpoint: POST /api/greenhouse/data/mq5
+// 
+// IMPORTANT: MQ-5 has a synchronized heating cycle with MQ-2:
+// - Heating Phase: 60 seconds (sensor warms up, NO measurements)
+// - Measurement Phase: 120 seconds (valid readings taken every 10 seconds)
+// Backend should ONLY process readings when mq5_operating_phase = "MEASURING"
+{
+  "device_id": "greenhouse_esp32_01",
+  "timestamp": "2025-10-15T22:45:00Z",
+  
+  // ===== LPG CONCENTRATION =====
+  // Liquefied Petroleum Gas concentration in PPM
+  // LPG commonly used in greenhouses for heating systems
+  // WARNING threshold: >600 ppm
+  // DANGER threshold: >1000 ppm
+  // Used for: Gas heater monitoring, leak detection, fuel supply tracking
+  "gas_mq5_lpg_ppm": 320,
+  
+  // ===== NATURAL GAS (METHANE) CONCENTRATION =====
+  // Methane (CH4) concentration in PPM
+  // CH4 used in many greenhouse heating systems
+  // WARNING threshold: >600 ppm
+  // DANGER threshold: >1000 ppm
+  // Used for: Gas supply monitoring, efficiency tracking, leak detection
+  "gas_mq5_natural_gas_ch4_ppm": 450,
+  
+  // ===== COAL GAS (CO) CONCENTRATION =====
+  // Coal gas/Carbon monoxide concentration in PPM
+  // Secondary CO measurement (MQ-7 is primary)
+  // Used for: Cross-validation with MQ-7, redundancy checking, safety verification
+  "gas_mq5_coal_gas_co_ppm": 85,
+  
+  // ===== MQ-5 OPERATING PHASE =====
+  // Current phase of sensor heating cycle
+  // Values:
+  //   "HEATING" - sensor warming up, DO NOT process data
+  //   "MEASURING" - valid measurements, process normally
+  //   "CALIBRATING" - first reading after heating, baseline being set
+  //   "ERROR" - sensor malfunction, discard reading
+  // Backend MUST check this before storing data
+  "mq5_operating_phase": "MEASURING",
+  
+  // ===== RAW SENSOR DATA (FOR ANALYSIS) =====
+  // Raw ADC reading before conversion to PPM
+  // Range: 0-4095 (12-bit ADC on ESP32)
+  // Used for: Backend analysis, trend detection, sensor degradation tracking
+  "mq5_raw_adc_value": 1850,
+  
+  // Sensor output voltage (Volts)
+  // Calculated from: ADC * (3.3V / 4095)
+  // Used for: Diagnostic analysis, voltage divider verification
+  "mq5_output_voltage": 1.49,
+  
+  // Sensor resistance (kΩ)
+  // Calculated from voltage divider circuit
+  // Lower Rs = more gas present
+  // Used for: PPM calculation verification, sensor health diagnosis
+  "mq5_sensor_resistance_kohm": 3.2,
+  
+  // ===== CHARACTERISTIC CURVE RATIO =====
+  // Rs/R0 ratio used in characteristic curve equation
+  // R0 = sensor resistance in clean air (calibrated baseline)
+  // Rs = current sensor resistance
+  // This ratio is directly used in: PPM = a * (Rs/Ro)^b
+  // Useful for: Backend validation of PPM calculation, trend analysis
+  "mq5_ratio_rs_r0": 0.45,
+  
+  // Baseline resistance in clean air (kΩ)
+  // Set during calibration phase
+  // Used for: Verifying R0 stability, detecting sensor drift
+  "mq5_r0_calibration_kohm": 7.1,
+  
+  // ===== SENSOR HEALTH =====
+  // Calibration status flag
+  // false = still in heating phase or calibration pending
+  // true = calibrated and producing valid measurements
+  "mq5_calibrated": true,
+  
+  // Number of consecutive sensor read errors
+  // 0 = working normally
+  // >3 = persistent problem, consider hardware check
+  // Used for: Alerting backend to sensor issues
+  "mq5_read_errors": 0,
+  
+  // System uptime in seconds
+  // For correlating sensor data with system operation
+  "uptime_seconds": 3600
+}
+
+// ============================================================================
+// DATABASE TABLE DESIGN RECOMMENDATIONS FOR BACKEND TEAM
+// ============================================================================
+/*
+SUGGESTED SEPARATE TABLE STRUCTURE:
+
+TABLE: greenhouse_dht22_readings
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - temperature_celsius (FLOAT)
+    - humidity_percent (FLOAT)
+  Indexes: timestamp, device_id
+
+TABLE: greenhouse_bmp280_readings
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - pressure_hpa (FLOAT)
+    - temperature_celsius (FLOAT)
+  Indexes: timestamp, device_id
+
+TABLE: greenhouse_flame_detection
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - flame_detected (BOOLEAN)
+    - digital_output (NUMBER)
+    - analog_value (NUMBER)
+    - alert_triggered (BOOLEAN)
+  Indexes: timestamp, device_id, flame_detected
+
+TABLE: greenhouse_ambient_light
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - ldr_adc_value (NUMBER)
+    - lux_estimate (NUMBER)
+  Indexes: timestamp, device_id
+
+TABLE: greenhouse_gas_quality (MQ-135, MQ-2, MQ-7)
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - mq135_co2_eq_ppm (FLOAT)
+    - mq135_raw_adc (NUMBER)
+    - mq2_smoke_lpg_ppm (FLOAT)
+    - mq2_raw_adc (NUMBER)
+    - mq7_carbon_monoxide_ppm (FLOAT)
+    - mq7_raw_adc (NUMBER)
+    - sensors_calibrated (BOOLEAN)
+  Indexes: timestamp, device_id
+
+TABLE: greenhouse_mq5_gas_detailed
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - lpg_ppm (FLOAT)
+    - natural_gas_ch4_ppm (FLOAT)
+    - coal_gas_co_ppm (FLOAT)
+    - operating_phase (VARCHAR2)
+    - raw_adc_value (NUMBER)
+    - output_voltage (FLOAT)
+    - sensor_resistance_kohm (FLOAT)
+    - rs_r0_ratio (FLOAT)
+    - r0_calibration_kohm (FLOAT)
+    - calibrated (BOOLEAN)
+    - read_errors (NUMBER)
+  Indexes: timestamp, device_id, operating_phase
+
+TABLE: greenhouse_system_health
+  Columns:
+    - timestamp (TIMESTAMP PRIMARY KEY)
+    - device_id (VARCHAR2)
+    - uptime_seconds (NUMBER)
+    - wifi_signal_dbm (NUMBER)
+    - sensors_calibrated (BOOLEAN)
+  Indexes: timestamp, device_id
+*/
+
+// ============================================================================
+// RAG AI ANALYSIS OPPORTUNITIES
+// ============================================================================
+/*
+Your backend team can use these data points for AI recommendations:
+
+1. ENVIRONMENTAL OPTIMIZATION
+   - Correlate temperature + humidity + CO2 (MQ-135) with growth rates
+   - Predict optimal CO2 enrichment schedules
+   - Detect when ventilation is insufficient (CO2 stays high)
+
+2. SAFETY & EMERGENCY DETECTION
+   - MQ-5 LPG spike + MQ-7 CO spike = heater malfunction
+   - Flame sensor + MQ-2 smoke = fire risk, auto-shutdown recommended
+   - CO trending upward = incomplete combustion, service alert
+
+3. EQUIPMENT DIAGNOSTICS
+   - Temperature drops + humidity rises = ventilation system failure
+   - Consistent CO elevation despite low heater usage = heater inefficiency
+   - Light levels constantly low despite time-of-day = grow lights need cleaning/replacement
+
+4. PREDICTIVE MAINTENANCE
+   - MQ-5 raw ADC trending downward = sensor degradation, calibration drift
+   - MQ-7 baseline shifting = sensor aging, recalibration needed soon
+   - Pressure fluctuations = HVAC system stress
+
+5. CROP OPTIMIZATION
+   - Optimal CO2 range for most plants: 800-1200 ppm during day
+   - Humidity should drop at night (60-70% day, 50-60% night) to prevent fungal disease
+   - Light levels coordinate with temperature for photosynthesis efficiency
+
+6. HISTORICAL TRENDING
+   - Daily/weekly patterns reveal system efficiency
+   - Seasonal adjustments needed (winter heating vs summer cooling)
+   - Compare multiple greenhouse zones to identify problem areas
+*/
+
+// ============================================================================
+// ESP32 FIRMWARE IMPLEMENTATION GUIDE
+// ============================================================================
+/*
+PSEUDOCODE FOR SENDING PAYLOADS:
+
+void loop() {
+  unsigned long currentTime = millis();
+  
+  // PAYLOAD 1: Send main sensors every 10 seconds
+  if (currentTime - lastMainRead >= 10000) {
+    readDHT22();
+    readBMP280();
+    readFlameAndLDR();
+    readMQ135();
+    readMQ2();
+    readMQ7();
+    
+    sendPayload1();  // POST to /api/greenhouse/data/main
+    lastMainRead = currentTime;
+  }
+  
+  // PAYLOAD 2: MQ-5 on separate cycle (heating synchronized with MQ-2)
+  manageMQHeatingCycle();
+  
+  if (!mqIsHeatingPhase) {  // Only send during measurement phase
+    if (currentTime - lastMQ5Read >= 10000) {
+      readMQ5();
+      sendPayload2();  // POST to /api/greenhouse/data/mq5
+      lastMQ5Read = currentTime;
+    }
+  }
+}
+
+void sendPayload1() {
+  String json = "{";
+  json += "\"device_id\":\"" + DEVICE_ID + "\",";
+  json += "\"timestamp\":\"" + getISO8601Timestamp() + "\",";
+  
+  // DHT22
+  json += "\"temperature_dht22_celsius\":" + String(dht_temp, 1) + ",";
+  json += "\"humidity_percent\":" + String(humidity, 1) + ",";
+  
+  // BMP280
+  json += "\"pressure_hpa\":" + String(pressure, 2) + ",";
+  json += "\"temperature_bmp280_celsius\":" + String(bmp_temp, 1) + ",";
+  
+  // Flame Sensor
+  json += "\"flame_detected\":" + String(flameDetected ? "true" : "false") + ",";
+  json += "\"flame_sensor_digital\":" + String(flame_digital) + ",";
+  json += "\"flame_sensor_analog\":" + String(flame_analog) + ",";
+  
+  // LDR
+  json += "\"ambient_light_ldr_adc\":" + String(ldr_adc) + ",";
+  json += "\"ambient_light_lux_estimate\":" + String(lux_estimate) + ",";
+  
+  // Gas Sensors
+  json += "\"gas_mq135_co2_equivalent_ppm\":" + String(mq135_ppm, 1) + ",";
+  json += "\"gas_mq135_raw_adc\":" + String(mq135_adc) + ",";
+  json += "\"gas_mq2_smoke_lpg_ppm\":" + String(mq2_ppm, 1) + ",";
+  json += "\"gas_mq2_raw_adc\":" + String(mq2_adc) + ",";
+  json += "\"gas_mq7_carbon_monoxide_ppm\":" + String(mq7_ppm, 1) + ",";
+  json += "\"gas_mq7_raw_adc\":" + String(mq7_adc) + ",";
+  
+  // Status
+  json += "\"sensors_calibrated\":" + String(allCalibrated ? "true" : "false") + ",";
+  json += "\"uptime_seconds\":" + String(millis() / 1000) + ",";
+  json += "\"wifi_signal_dbm\":" + String(WiFi.RSSI());
+  json += "}";
+  
+  postToBackend("https://your-backend.com/api/greenhouse/data/main", json);
+}
+
+void sendPayload2() {
+  String json = "{";
+  json += "\"device_id\":\"" + DEVICE_ID + "\",";
+  json += "\"timestamp\":\"" + getISO8601Timestamp() + "\",";
+  json += "\"gas_mq5_lpg_ppm\":" + String(mq5_lpg_ppm, 1) + ",";
+  json += "\"gas_mq5_natural_gas_ch4_ppm\":" + String(mq5_ch4_ppm, 1) + ",";
+  json += "\"gas_mq5_coal_gas_co_ppm\":" + String(mq5_co_ppm, 1) + ",";
+  json += "\"mq5_operating_phase\":\"" + String(mqIsHeating ? "HEATING" : "MEASURING") + "\",";
+  json += "\"mq5_raw_adc_value\":" + String(mq5_raw_adc) + ",";
+  json += "\"mq5_output_voltage\":" + String(mq5_voltage, 2) + ",";
+  json += "\"mq5_sensor_resistance_kohm\":" + String(mq5_Rs, 2) + ",";
+  json += "\"mq5_ratio_rs_r0\":" + String(mq5_ratio, 3) + ",";
+  json += "\"mq5_r0_calibration_kohm\":" + String(mq5_R0, 2) + ",";
+  json += "\"mq5_calibrated\":" + String(mq5Calibrated ? "true" : "false") + ",";
+  json += "\"mq5_read_errors\":" + String(mq5_errors) + ",";
+  json += "\"uptime_seconds\":" + String(millis() / 1000);
+  json += "}";
+  
+  postToBackend("https://your-backend.com/api/greenhouse/data/mq5", json);
+}
+
+void postToBackend(String endpoint, String payload) {
+  HTTPClient http;
+  http.begin(endpoint);
+  http.addHeader("Content-Type", "application/json");
+  int httpCode = http.POST(payload);
+  
+  if (httpCode == 200) {
+    Serial.println("Data sent successfully");
+  } else {
+    Serial.print("Error: HTTP ");
+    Serial.println(httpCode);
+  }
+  
+  http.end();
+}
+*/
