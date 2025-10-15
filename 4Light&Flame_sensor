@@ -1,0 +1,349 @@
+// Include Libraries
+#include "Arduino.h"
+#include <Wire.h>
+#include <Adafruit_BMP280.h>
+#include "DHT.h"
+
+// Pin Definitions
+#define SDA_PIN 21        // I2C SDA for BMP280
+#define SCL_PIN 22        // I2C SCL for BMP280
+#define DHT_PIN_DATA 16   // DHT22 data pin
+#define FLAME_SENSOR_PIN 35  // Flame sensor analog pin
+#define LDR_PIN 34        // LDR analog pin
+
+// Sensor objects
+Adafruit_BMP280 bmp;      // I2C interface for BMP280
+DHT dht(DHT_PIN_DATA, DHT22);  // DHT22 sensor
+
+// Sensor type definitions
+#define DHTTYPE DHT22
+
+// Greenhouse optimal ranges
+// Temperature & Humidity (DHT22)
+const float TEMP_MIN_OPTIMAL = 18.0;
+const float TEMP_MAX_OPTIMAL = 27.0;
+const float TEMP_MIN_CRITICAL = 10.0;
+const float TEMP_MAX_CRITICAL = 35.0;
+const float HUMIDITY_MIN_OPTIMAL = 50.0;
+const float HUMIDITY_MAX_OPTIMAL = 70.0;
+
+// Pressure (BMP280)
+const float PRESSURE_MIN = 980.0;
+const float PRESSURE_NORMAL = 1013.25;
+const float PRESSURE_MAX = 1040.0;
+
+// Flame sensor threshold (ADJUST THIS VALUE BASED ON CALIBRATION!)
+// A lower value typically means more flame detected.
+// Start with a value like 3000-3500 and calibrate as described below.
+const int FLAME_THRESHOLD = 3000;
+
+// Light levels for LDR
+const int LDR_VERY_BRIGHT = 3500;
+const int LDR_BRIGHT = 2500;
+const int LDR_MODERATE = 1000;
+const int LDR_DIM = 200;
+
+// Global variables
+float baselinePressure = PRESSURE_NORMAL;
+bool baselineSet = false;
+unsigned long lastSensorRead = 0;
+const unsigned long SENSOR_READ_INTERVAL = 2000; // Read all sensors every 2 seconds
+
+void setup()
+{
+    // Setup Serial for debugging
+    Serial.begin(115200);
+    delay(1000); // Give serial time to initialize
+
+    Serial.println(F("\n╔════════════════════════════════════════╗"));
+    Serial.println(F("║    GREENHOUSE MULTI-SENSOR SYSTEM     ║"));
+    Serial.println(F("╚════════════════════════════════════════╝"));
+    Serial.println(F("\nInitializing all sensors..."));
+
+    // Initialize I2C for BMP280
+    Wire.begin(SDA_PIN, SCL_PIN);
+
+    // Initialize BMP280 sensor
+    Serial.print(F("BMP280 (Pressure/Temp)... "));
+    // Try both common I2C addresses
+    if (!bmp.begin(0x76) && !bmp.begin(0x77))
+    {
+        Serial.println(F("FAILED!"));
+        Serial.println(F("Check I2C wiring (GPIO 21/22) or sensor address"));
+    }
+    else
+    {
+        Serial.println(F("OK"));
+        bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
+                        Adafruit_BMP280::SAMPLING_X2,
+                        Adafruit_BMP280::SAMPLING_X16,
+                        Adafruit_BMP280::FILTER_X16,
+                        Adafruit_BMP280::STANDBY_MS_500);
+    }
+
+    // Initialize DHT22 sensor
+    Serial.print(F("DHT22 (Temp/Humidity)... "));
+    dht.begin();
+    Serial.println(F("OK"));
+
+    // Analog sensors (Flame and LDR) don't need explicit initialization for analogRead
+    // However, it's good practice to set them as INPUT if they were digital
+    pinMode(FLAME_SENSOR_PIN, INPUT);
+    pinMode(LDR_PIN, INPUT);
+    Serial.print(F("Flame Sensor (GPIO 35)... "));
+    Serial.println(F("OK"));
+    Serial.print(F("LDR (GPIO 34)... "));
+    Serial.println(F("OK"));
+
+    Serial.println(F("\nAll sensors initialized successfully!"));
+    Serial.println(F("Starting continuous monitoring...\n"));
+    Serial.println(F("════════════════════════════════════════\n"));
+
+    // Provide initial baseline for flame sensor calibration
+    Serial.println(F("\n*** FLAME SENSOR CALIBRATION TIP ***"));
+    Serial.println(F("Observe 'Flame Value' in a normal, no-flame environment."));
+    Serial.println(F("Then, introduce a small flame and note the new 'Flame Value'."));
+    Serial.println(F("Adjust 'FLAME_THRESHOLD' to be a value between these two readings."));
+    Serial.println(F("Current threshold: ") + String(FLAME_THRESHOLD));
+    Serial.println(F("************************************\n"));
+
+    delay(2000);
+}
+
+void loop()
+{
+    unsigned long currentTime = millis();
+
+    // Read all sensors at regular intervals
+    if (currentTime - lastSensorRead >= SENSOR_READ_INTERVAL)
+    {
+        lastSensorRead = currentTime;
+        readAllSensors();
+    }
+
+    // Check for user input
+    if (Serial.available())
+    {
+        char c = Serial.read();
+        if(c == 'm' || c == 'M')
+        {
+            showMenu();
+        }
+        else if(c == 's' || c == 'S')
+        {
+            readAllSensors(); // Force sensor reading
+        }
+        else if(c == 'c' || c == 'C') // Added a command to suggest calibration
+        {
+            Serial.println(F("\n*** FLAME SENSOR CALIBRATION INFO ***"));
+            Serial.println(F("1. Ensure there is NO FLAME near the sensor. Note the 'Flame Value'. (e.g., 4000)"));
+            Serial.println(F("2. Introduce a SMALL FLAME (e.g., a lighter) near the sensor. Note the 'Flame Value'. (e.g., 500)"));
+            Serial.println(F("3. Set FLAME_THRESHOLD to a value between these two. For example, if no flame is 4000 and flame is 500, set threshold to 2000."));
+            Serial.println(F("   The condition `if(flameValue < FLAME_THRESHOLD)` means LOWER value = FLAME DETECTED."));
+            Serial.println(F("Current FLAME_THRESHOLD: ") + String(FLAME_THRESHOLD));
+            Serial.println(F("*************************************\n"));
+        }
+    }
+}
+
+void readAllSensors()
+{
+    Serial.println(F("╔════════════════════════════════════════╗"));
+    Serial.println(F("║      GREENHOUSE SENSOR READINGS       ║"));
+    Serial.println(F("╚════════════════════════════════════════╝"));
+    Serial.println();
+
+    // Read and display DHT22 data
+    readDHT22();
+    Serial.println();
+
+    // Read and display BMP280 data
+    readBMP280();
+    Serial.println();
+
+    // Read and display Flame sensor data
+    readFlameSensor();
+    Serial.println();
+
+    // Read and display LDR data
+    readLDR();
+
+    Serial.println(F("════════════════════════════════════════\n"));
+}
+
+void readDHT22()
+{
+    float humidity = dht.readHumidity();
+    float tempC = dht.readTemperature();
+
+    if (isnan(humidity) || isnan(tempC))
+    {
+        Serial.println(F("🌡️  DHT22: SENSOR ERROR - Check wiring"));
+        return;
+    }
+
+    Serial.println(F("🌡️  DHT22 - TEMPERATURE & HUMIDITY"));
+    Serial.print(F("   Temp: "));
+    Serial.print(tempC, 1);
+    Serial.print(F("°C | Humidity: "));
+    Serial.print(humidity, 1);
+    Serial.println(F("%"));
+
+    // Status assessment
+    String tempStatus = assessTemperature(tempC);
+    String humidStatus = assessHumidity(humidity);
+    Serial.print(F("   Status: Temp - "));
+    Serial.print(tempStatus);
+    Serial.print(F(" | Humidity - "));
+    Serial.println(humidStatus);
+}
+
+void readBMP280()
+{
+    // No need to re-initialize bmp.begin() here, it was done in setup.
+    // If bmp failed in setup, further reads will also likely fail.
+    // You could add a check like 'if (!bmp.isChipIdValid())' if needed,
+    // but typically if setup succeeded, reads should work.
+
+    float temperature = bmp.readTemperature();
+    float pressure = bmp.readPressure() / 100.0F;
+
+    // Set baseline on first reading
+    if(!baselineSet && pressure > 0) // Only set baseline if pressure is valid
+    {
+        baselinePressure = pressure;
+        baselineSet = true;
+    }
+
+    Serial.println(F("🌍 BMP280 - PRESSURE & TEMPERATURE"));
+    if (pressure > 0) { // Check for valid reading
+      Serial.print(F("   Pressure: "));
+      Serial.print(pressure, 2);
+      Serial.print(F(" hPa | Temp: "));
+      Serial.print(temperature, 1);
+      Serial.println(F("°C"));
+
+      // Pressure assessment
+      String pressureStatus = assessPressure(pressure);
+      Serial.print(F("   Status: "));
+      Serial.println(pressureStatus);
+    } else {
+      Serial.println(F("   Failed to read BMP280 data."));
+    }
+}
+
+void readFlameSensor()
+{
+    int flameValue = analogRead(FLAME_SENSOR_PIN);
+
+    Serial.println(F("🔥 FLAME SENSOR"));
+    Serial.print(F("   Value: "));
+    Serial.print(flameValue);
+    Serial.print(F(" (Analog Read Range: 0-4095 for ESP32)")); // Added context
+    Serial.print(F(" | Threshold: "));
+    Serial.println(FLAME_THRESHOLD);
+
+    // Most common flame sensors output a LOW analog value when flame is detected.
+    // If your sensor works the other way (HIGH value on flame), then reverse the comparison.
+    if(flameValue < FLAME_THRESHOLD)
+    {
+        Serial.println(F("   ⚠️  FLAME DETECTED! - Check greenhouse immediately!"));
+    }
+    else
+    {
+        Serial.println(F("   ✅ No flame detected"));
+    }
+}
+
+void readLDR()
+{
+    int ldrValue = analogRead(LDR_PIN);
+
+    Serial.println(F("💡 LDR - LIGHT SENSOR"));
+    Serial.print(F("   Value: "));
+    Serial.print(ldrValue);
+    Serial.println(F(" (Analog Read Range: 0-4095 for ESP32)")); // Added context
+
+    String brightnessLevel;
+    if(ldrValue > LDR_VERY_BRIGHT)
+        brightnessLevel = "Very Bright (Direct Sunlight)";
+    else if(ldrValue > LDR_BRIGHT)
+        brightnessLevel = "Bright (Well-Lit Room)";
+    else if(ldrValue > LDR_MODERATE)
+        brightnessLevel = "Moderate (Cloudy Day/Indoor)";
+    else if(ldrValue > LDR_DIM)
+        brightnessLevel = "Dim (Dusk/Low Light)";
+    else
+        brightnessLevel = "Dark (Night/Covered)";
+
+    Serial.print(F("   Level: "));
+    Serial.println(brightnessLevel);
+}
+
+// Assessment functions
+String assessTemperature(float temp)
+{
+    if(temp < TEMP_MIN_CRITICAL)
+        return "CRITICAL LOW";
+    else if(temp < TEMP_MIN_OPTIMAL)
+        return "Below Optimal";
+    else if(temp <= TEMP_MAX_OPTIMAL)
+        return "Optimal";
+    else if(temp <= TEMP_MAX_CRITICAL)
+        return "Above Optimal";
+    else
+        return "CRITICAL HIGH";
+}
+
+String assessHumidity(float humidity)
+{
+    if(humidity < 30.0)
+        return "Very Low";
+    else if(humidity < HUMIDITY_MIN_OPTIMAL)
+        return "Below Optimal";
+    else if(humidity <= HUMIDITY_MAX_OPTIMAL)
+        return "Optimal";
+    else if(humidity <= 80.0)
+        return "Above Optimal";
+    else
+        return "Very High";
+}
+
+String assessPressure(float pressure)
+{
+    if(pressure < 980.0)
+        return "Very Low - Storm";
+    else if(pressure < 1000.0)
+        return "Low - Unsettled";
+    else if(pressure < 1020.0)
+        return "Normal - Stable";
+    else if(pressure < 1030.0)
+        return "High - Fair";
+    else
+        return "Very High - Settled";
+}
+
+void showMenu()
+{
+    Serial.println(F("\n╔════════════════════════════════════════╗"));
+    Serial.println(F("║          SENSOR SYSTEM MENU           ║"));
+    Serial.println(F("╚════════════════════════════════════════╝"));
+    Serial.println(F("(S) Read Sensors Now"));
+    Serial.println(F("(M) Show this Menu"));
+    Serial.println(F("(C) Flame Sensor Calibration Info")); // Added menu option
+    Serial.println(F("\nAuto-reading every 2 seconds"));
+    Serial.println(F("════════════════════════════════════════\n"));
+}
+
+/*******************************************************
+*    Greenhouse Multi-Sensor Monitoring System
+*    IFS325 Group Project - ARC Smart Agriculture
+*
+*    Integrated Sensors:
+*    - BMP280: Pressure & Temperature
+*    - DHT22: Temperature & Humidity
+*    - Flame Sensor: Fire detection
+*    - LDR: Light intensity
+*
+*    All sensors run simultaneously
+*******************************************************/
