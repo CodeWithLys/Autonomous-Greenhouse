@@ -3,7 +3,7 @@
  * IFS325 Group Project - ARC Smart Agriculture
  * ESP32 Version - All Sensors Running Simultaneously
  * 
- * Sensors: BMP280, DHT22, Flame, LDR, MQ135, MQ2, MQ5, MQ7
+ * Sensors: BMP280, DHT22, Flame, LDR, MQ135, MQ2, MQ7
  */
 
 #include "Arduino.h"
@@ -44,11 +44,11 @@ int mq7_baseline = 0;
 bool gas_sensors_calibrated = false;
 
 // Flame Sensor Threshold
-const int FLAME_THRESHOLD = 3000;
+const int FLAME_THRESHOLD = 2000;
 
 // ============ TIMING VARIABLES ============
 unsigned long lastReadTime = 0;
-const long READ_INTERVAL = 2000;  // Read all sensors every 2 seconds
+const long READ_INTERVAL = 10000;  // Read all sensors every 10 seconds
 
 // ============ SETUP ============
 void setup() {
@@ -86,7 +86,6 @@ void setup() {
   pinMode(LDR_PIN, INPUT);
   pinMode(MQ135_PIN, INPUT);
   pinMode(MQ2_PIN, INPUT);
-  pinMode(MQ5_PIN, INPUT);
   pinMode(MQ7_PIN, INPUT);
   Serial.println("✓ Analog pins configured");
   
@@ -260,8 +259,8 @@ void readMQ2() {
   Serial.println(drop);
   Serial.print("   Status: ");
   
-  if (drop > 1500) Serial.println("⚠⚠ CRITICAL - HIGH GAS/SMOKE ⚠⚠");
-  else if (drop > 750) Serial.println("⚠ Elevated gas/smoke levels");
+  if (drop > 750) Serial.println("⚠⚠ CRITICAL - HIGH GAS/SMOKE ⚠⚠");
+  else if (drop > 300) Serial.println("⚠ Elevated gas/smoke levels");
   else Serial.println("✓ Safe");
 }
 
@@ -278,8 +277,8 @@ void readMQ7() {
   Serial.println(drop);
   Serial.print("   Status: ");
   
-  if (drop > 1500) Serial.println("⚠⚠ CRITICAL - DANGEROUS CO LEVEL ⚠⚠");
-  else if (drop > 750) Serial.println("⚠ Elevated CO levels - ventilate");
+  if (drop > 750) Serial.println("⚠⚠ CRITICAL - HIGH GAS LEVEL ⚠⚠");
+  else if (drop > 300) Serial.println("⚠ Elevated CO levels - ventilate");
   else Serial.println("✓ Safe");
 }
 
