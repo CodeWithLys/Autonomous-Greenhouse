@@ -9,6 +9,7 @@
 #include <Adafruit_BMP280.h>
 #include "DHT.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
