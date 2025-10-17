@@ -29,9 +29,9 @@
 
 // ============ WIFI & ORACLE APEX CREDENTIALS ============
 const char* ssid = "YOUR_SSID";
-const char* password = "YOUR_PASSWORD";
-const char* oracle_apex_url = "https://your-oracle-instance.com/ords/your_schema/greenhouse_sensors";
-const char* oracle_api_key = "YOUR_API_KEY_IF_REQUIRED";
+const char* password = "";
+const char* oracle_apex_url = "https://oracleapex.com/ords/uwc123/greenhouse_monitoring/sensors";
+const char* oracle_api_key = "";
 
 // ============ SENSOR OBJECT INITIALIZATION ============
 Adafruit_BMP280 bmp;
