@@ -1,0 +1,5 @@
+// ============ WIFI & ORACLE APEX CREDENTIALS ============
+const char* ssid = "YOUR_WIFI_SSID";          // <<<<<< UPDATE THIS
+const char* password = "YOUR_WIFI_PASSWORD";  // <<<<<< UPDATE THIS
+const char* oracle_apex_url = "https://oracleapex.com/ords/uwc123/greenhouse_monitoring/sensors";
+const char* oracle_api_key = "";              // <<<<<< Leave blank
