@@ -28,8 +28,8 @@
 #define MQ7_PIN 14
 
 // ============ WIFI & ORACLE APEX CREDENTIALS ============
-const char* ssid = "YOUR_SSID";
-const char* password = "";
+const char* ssid = "Enrique...";
+const char* password = "Enrique.";
 const char* oracle_apex_url = "https://oracleapex.com/ords/uwc123/greenhouse_monitoring/sensors";
 const char* oracle_api_key = "";
 
