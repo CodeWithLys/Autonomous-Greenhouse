@@ -5,6 +5,8 @@
  *
  * All fixes for JSON serialization and HTTP -11 errors
  * (RAM optimization and connection timeout) are included.
+ *
+ * LATEST UPDATE: Removed all oracle_api_key logic.
  */
 
 #include "Arduino.h"
@@ -37,7 +39,6 @@
 const char* ssid = "Enrique..."; // Your WiFi Name
 const char* password = "Enrique."; // Your WiFi Password
 const char* oracle_apex_url = "https://oracleapex.com/ords/uwc123/greenhouse_monitoring/sensors";
-const char* oracle_api_key = ""; // Left blank as you specified
 
 // ============ SENSOR OBJECT INITIALIZATION ============
 Adafruit_BMP280 bmp;
@@ -362,11 +363,12 @@ void sendToOracleAPEX() {
   // *** FIX APPLIED ***: 10-second timeout for the connection
   http.setTimeout(10000); 
   
+  // -- ALL HEADERS --
   http.addHeader("Content-Type", "application/json");
-  
-  if (strlen(oracle_api_key) > 0) {
-    http.addHeader("Authorization", String("Bearer ") + oracle_api_key);
-  }
+  http.addHeader("Accept", "application/json"); 
+  http.addHeader("User-Agent", "ESP32-Greenhouse-Monitor"); 
+
+  // *** REMOVED ***: All oracle_api_key logic is gone.
   
   // Create and send JSON payload
   String jsonPayload = createJsonPayload();
@@ -428,10 +430,3 @@ void calibrateGasSensors() {
   Serial.println(mq7_baseline);
   Serial.println("\n✓ Gas sensor calibration complete!\n");
 }
-
-/*
- * WIRING REFERENCE (from original code):
- * Flame: 35, DHT: 16, LDR: 4
- * SDA: 21, SCL: 22
- * MQ135: 32, MQ2: 33, MQ7: 14 (Check original notes for 5V dividers)
- */
