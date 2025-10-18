@@ -4,6 +4,7 @@
  * ESP32 Version - All Sensors Running Simultaneously
  * 
  * Sensors: BMP280, DHT22, Flame, LDR, MQ135, MQ2, MQ7
+ * FIXED: Gas sensor drop calculation corrected (raw - baseline)
  */
 
 #include "Arduino.h"
@@ -42,6 +43,11 @@ int mq135_baseline = 0;
 int mq2_baseline = 0;
 int mq7_baseline = 0;
 bool gas_sensors_calibrated = false;
+
+// LDR Calibration
+int ldr_dark_baseline = 0;
+int ldr_bright_baseline = 0;
+bool ldr_calibrated = false;
 
 // Flame Sensor Threshold
 const int FLAME_THRESHOLD = 2000;
@@ -93,11 +99,11 @@ void setup() {
   Serial.println("║           GAS SENSOR CALIBRATION PHASE               ║");
   Serial.println("╚══════════════════════════════════════════════════════╝");
   Serial.println("Ensuring all sensors are in CLEAN AIR environment...");
-  Serial.println("Gas sensors warming up and calibrating (60 seconds)...\n");
+  Serial.println("Gas sensors warming up and calibrating (300 seconds)...\n");
   
-  // Extended warm-up for gas sensors
-  for (int i = 60; i > 0; i--) {
-    if (i % 10 == 0) {
+  // Extended warm-up for gas sensors (5 minutes for MQ7 stabilization)
+  for (int i = 300; i > 0; i--) {
+    if (i % 30 == 0) {
       Serial.print("Warming up: ");
       Serial.print(i);
       Serial.println(" seconds remaining...");
@@ -221,16 +227,33 @@ void readLDR() {
   Serial.println(ldrRaw);
   Serial.print("   Brightness: ");
   
-  if (ldrRaw > 3500) Serial.println("Very Bright (Sunlight)");
-  else if (ldrRaw > 2500) Serial.println("Bright (Well-lit)");
-  else if (ldrRaw > 1000) Serial.println("Moderate (Cloudy/Indoor)");
-  else if (ldrRaw > 200) Serial.println("Dim (Dusk)");
-  else Serial.println("Dark (Night)");
+  // Adaptive brightness levels based on sensor range
+  // Divide the 0-4095 range into meaningful segments
+  int brightness_level = map(ldrRaw, 0, 4095, 0, 5);
+  
+  switch(brightness_level) {
+    case 0:
+      Serial.println("Dark (Night) - Raw: 0-819");
+      break;
+    case 1:
+      Serial.println("Dim (Dusk/Low Indoor) - Raw: 820-1638");
+      break;
+    case 2:
+      Serial.println("Moderate (Cloudy/Indoor) - Raw: 1639-2457");
+      break;
+    case 3:
+      Serial.println("Bright (Well-lit) - Raw: 2458-3276");
+      break;
+    case 4:
+    case 5:
+      Serial.println("Very Bright (Sunlight/Flash) - Raw: 3277-4095");
+      break;
+  }
 }
 
 void readMQ135() {
   int mq135_raw = analogRead(MQ135_PIN);
-  int drop = mq135_baseline - mq135_raw;
+  int drop = mq135_raw - mq135_baseline;  // FIXED: raw - baseline
   
   Serial.println("🌫️  MQ135 - CO2/AIR QUALITY");
   Serial.print("   Raw Value: ");
@@ -248,7 +271,7 @@ void readMQ135() {
 
 void readMQ2() {
   int mq2_raw = analogRead(MQ2_PIN);
-  int drop = mq2_baseline - mq2_raw;
+  int drop = mq2_raw - mq2_baseline;  // FIXED: raw - baseline
   
   Serial.println("💨 MQ2 - LPG/SMOKE DETECTION");
   Serial.print("   Raw Value: ");
@@ -266,7 +289,7 @@ void readMQ2() {
 
 void readMQ7() {
   int mq7_raw = analogRead(MQ7_PIN);
-  int drop = mq7_baseline - mq7_raw;
+  int drop = mq7_raw - mq7_baseline;  // FIXED: raw - baseline
   
   Serial.println("☠️  MQ7 - CARBON MONOXIDE (CO)");
   Serial.print("   Raw Value: ");
@@ -276,6 +299,12 @@ void readMQ7() {
   Serial.print("   Drop: ");
   Serial.println(drop);
   Serial.print("   Status: ");
+  
+  // MQ7 sensitivity check - if baseline is suspiciously low, warn user
+  if (mq7_baseline < 100) {
+    Serial.println("⚠ CALIBRATION WARNING - Baseline very low, sensor may not be properly warmed");
+    return;
+  }
   
   if (drop > 750) Serial.println("⚠⚠ CRITICAL - HIGH GAS LEVEL ⚠⚠");
   else if (drop > 300) Serial.println("⚠ Elevated CO levels - ventilate");
