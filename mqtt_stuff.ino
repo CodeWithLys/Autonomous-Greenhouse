@@ -29,11 +29,11 @@
 #define MQ7_PIN 14
 
 // ============ WIFI CREDENTIALS (Unchanged) ============
-const char* ssid = "Durham12B-Room1"; // Your WiFi Name
-const char* password = "BHANA64#"; // Your WiFi Password
+const char* ssid = "TP-Link_3E84"; // Your WiFi Name
+const char* password = "87835755"; // Your WiFi Password
 
 // ============ MQTT & BROKER CREDENTIALS ============
-const char* mqtt_server = "192.168.0.104"; // Public test broker
+const char* mqtt_server = "192.168.0.106";// Public test broker
 const int   mqtt_port = 1883;
 const char* mqtt_topic = "greenhouse/sensor_data";
 const char* mqtt_client_id = "esp32-greenhouse-monitor-123"; // Must be unique
@@ -90,14 +90,20 @@ void setup() {
   connectToWiFi();
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
-  // --- NEW: Configure MQTT Client ---
+  // --- Configure MQTT Client ---
   mqttClient.setServer(mqtt_server, mqtt_port);
+  
+  // *** SOLUTION ADDED HERE ***
+  // Increase the internal buffer size to handle the large JSON payload.
+  // The default is 256 bytes, which is too small for our data.
+  mqttClient.setBufferSize(1024);
+  
   Serial.println("✓ MQTT client configured");
 
   // --- Gas Sensor Calibration (Unchanged) ---
   Serial.println("\n--- GAS SENSOR CALIBRATION PHASE ---");
-  Serial.println("Gas sensors warming up (300 seconds)...");
-  for (int i = 300; i > 0; i--) { if (i % 30 == 0) { Serial.printf("Warming up: %d seconds remaining...\n", i); } delay(1000); }
+  Serial.println("Gas sensors warming up (120 seconds)...");
+  for (int i = 120; i > 0; i--) { if (i % 30 == 0) { Serial.printf("Warming up: %d seconds remaining...\n", i); } delay(1000); }
   calibrateGasSensors();
   Serial.println("\n--- INITIALIZATION COMPLETE - MONITORING STARTED ---\n");
 }
