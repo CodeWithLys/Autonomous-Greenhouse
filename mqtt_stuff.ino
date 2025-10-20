@@ -33,9 +33,9 @@ const char* ssid = "2024"; // Your WiFi Name
 const char* password = "2024@uwc"; // Your WiFi Password
 
 // ============ MQTT & BROKER CREDENTIALS ============
-const char* mqtt_server = "172.17.131.50";// Public test broker
+const char* mqtt_server = "172.17.129.102";// Public test broker
 const int   mqtt_port = 1883;
-const char* mqtt_topic = "greenhouse/sensor_data";
+const char* mqtt_topic = "arc/Greenhouse-monitoring/group9/Greenhouse-sensor";
 const char* mqtt_client_id = "esp32-greenhouse-monitor-123"; // Must be unique
 
 // ============ SENSOR OBJECT INITIALIZATION ============
