@@ -29,11 +29,11 @@
 #define MQ7_PIN 14
 
 // ============ WIFI CREDENTIALS (Unchanged) ============
-const char* ssid = "TP-Link_3E84"; // Your WiFi Name
-const char* password = "87835755"; // Your WiFi Password
+const char* ssid = "2024"; // Your WiFi Name
+const char* password = "2024@uwc"; // Your WiFi Password
 
 // ============ MQTT & BROKER CREDENTIALS ============
-const char* mqtt_server = "192.168.0.106";// Public test broker
+const char* mqtt_server = "172.17.131.50";// Public test broker
 const int   mqtt_port = 1883;
 const char* mqtt_topic = "greenhouse/sensor_data";
 const char* mqtt_client_id = "esp32-greenhouse-monitor-123"; // Must be unique
