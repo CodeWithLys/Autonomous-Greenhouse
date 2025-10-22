@@ -1,11 +1,10 @@
 /*
- * UNIFIED GREENHOUSE SENSOR MONITORING SYSTEM
+ * UNIFIED GREENHOUSE SENSOR MONITORING SYSTEM WITH API INTEGRATION
  * IFS325 Group Project - ARC Smart Agriculture
- * Oracle APEX Integration - FULLY CORRECTED CODE
- *
- * Fixes:
- * - Increased JSON buffer to 1024 to prevent overflow.
- * - Increased HTTP timeout to 20 seconds for stability.
+ * ESP32 Version - All Sensors with JSON POST to Oracle APEX
+ * 
+ * Sensors: BMP280, DHT22, Flame, LDR, MQ135, MQ2, MQ7
+ * Features: WiFi connectivity, JSON payload creation, HTTP POST to API
  */
 
 #include "Arduino.h"
@@ -13,36 +12,35 @@
 #include <Adafruit_BMP280.h>
 #include "DHT.h"
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <time.h>
+
+// ============ WiFi CREDENTIALS ============
+const char* ssid = "2024";              // Replace with your WiFi SSID
+const char* password = "2024@uwc";      // Replace with your WiFi password
+
+// ============ API ENDPOINT ============
+const char* serverURL = "https://apex.oracle.com/pls/apex/your_workspace/sensor-data";  // Replace with your actual API endpoint
 
 // ============ PIN DEFINITIONS ============
 // Environmental Sensors
-#define FLAME_SENSOR_PIN 35
-#define DHT_PIN 16
-#define LDR_PIN 4
-#define DHTTYPE DHT22
+#define FLAME_SENSOR_PIN 35      // Analog - Flame detection
+#define DHT_PIN 16               // Digital - Temperature & Humidity
+#define LDR_PIN 34               // Analog - Ambient light
+#define DHTTYPE DHT22            // DHT22 sensor type
 
 // I2C Sensors
-#define SDA_PIN 21
-#define SCL_PIN 22
+#define SDA_PIN 21               // I2C SDA
+#define SCL_PIN 22               // I2C SCL
 
 // Gas Sensors (Analog)
-#define MQ135_PIN 32
-#define MQ2_PIN 33
-#define MQ7_PIN 14
-
-// ============ WIFI & ORACLE APEX CREDENTIALS ============
-const char* ssid = "Durham12B-Room1"; // Your WiFi Name
-const char* password = "BHANA64#"; // Your WiFi Password
-const char* oracle_apex_url = "https://oracleapex.com/ords/at2/greenhouse/sensor";
+#define MQ135_PIN 32             // Analog - CO2/Air Quality
+#define MQ2_PIN 33               // Analog - LPG/Smoke
+#define MQ7_PIN 39               // Analog - Carbon Monoxide
 
 // ============ SENSOR OBJECT INITIALIZATION ============
 Adafruit_BMP280 bmp;
 DHT dht(DHT_PIN, DHTTYPE);
-WiFiClientSecure wifiClient; // For HTTPS connections
 
 // ============ CALIBRATION & BASELINE VALUES ============
 const float PRESSURE_NORMAL = 1013.25;
@@ -58,13 +56,12 @@ const int FLAME_THRESHOLD = 2000;
 
 // ============ TIMING VARIABLES ============
 unsigned long lastReadTime = 0;
-const long READ_INTERVAL = 10000; // Read all sensors every 10 seconds
+const long READ_INTERVAL = 10000;  // Read and send data every 10 seconds
 
-// ============ JSON PAYLOAD STRUCTURE ============
-// This struct holds all sensor data in one "package"
-struct SensorPayload {
-  float temperature_bmp280;
-  float temperature_dht22;
+// ============ SENSOR DATA STRUCTURE ============
+struct SensorData {
+  float temp_bmp280;
+  float temp_dht22;
   float pressure;
   float altitude;
   float humidity;
@@ -79,25 +76,22 @@ struct SensorPayload {
   int mq7_raw;
   int mq7_baseline;
   int mq7_drop;
-  long timestamp;
+  bool valid;
 };
-
-// Create a single global instance of our data structure
-SensorPayload sensorData;
-
 
 // ============ SETUP ============
 void setup() {
   Serial.begin(115200);
   delay(1000);
-
-  Serial.println("\n\nUNIFIED GREENHOUSE SENSOR MONITORING SYSTEM");
-  Serial.println("IFS325 Group Project - ARC Smart Agriculture");
-  Serial.println("Oracle APEX Integration\n");
-
+  
+  Serial.println("\n\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║   GREENHOUSE SENSOR SYSTEM WITH API INTEGRATION      ║");
+  Serial.println("║   IFS325 Group Project - ARC Smart Agriculture       ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝\n");
+  
   // Initialize I2C for BMP280
   Wire.begin(SDA_PIN, SCL_PIN);
-
+  
   // Initialize BMP280
   if (!bmp.begin(0x76)) {
     if (!bmp.begin(0x77)) {
@@ -111,11 +105,11 @@ void setup() {
                   Adafruit_BMP280::FILTER_X16,
                   Adafruit_BMP280::STANDBY_MS_500);
   Serial.println("✓ BMP280 initialized");
-
+  
   // Initialize DHT22
   dht.begin();
   Serial.println("✓ DHT22 initialized");
-
+  
   // Configure analog pins
   pinMode(FLAME_SENSOR_PIN, INPUT);
   pinMode(LDR_PIN, INPUT);
@@ -123,18 +117,17 @@ void setup() {
   pinMode(MQ2_PIN, INPUT);
   pinMode(MQ7_PIN, INPUT);
   Serial.println("✓ Analog pins configured");
-
+  
   // Connect to WiFi
   connectToWiFi();
-
-  // Set time via NTP for accurate timestamps
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-
-  Serial.println("\n--- GAS SENSOR CALIBRATION PHASE ---");
+  
+  // Calibrate gas sensors
+  Serial.println("\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║           GAS SENSOR CALIBRATION PHASE               ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝");
   Serial.println("Ensuring all sensors are in CLEAN AIR environment...");
   Serial.println("Gas sensors warming up and calibrating (300 seconds)...\n");
-
-  // Extended warm-up for gas sensors
+  
   for (int i = 300; i > 0; i--) {
     if (i % 30 == 0) {
       Serial.print("Warming up: ");
@@ -143,281 +136,279 @@ void setup() {
     }
     delay(1000);
   }
-
-  // Calibrate gas sensors in clean air
+  
   calibrateGasSensors();
-
-  Serial.println("\n--- INITIALIZATION COMPLETE - MONITORING STARTED ---\n");
+  
+  Serial.println("\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║        INITIALIZATION COMPLETE - MONITORING STARTED  ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝\n");
 }
 
 // ============ MAIN LOOP ============
 void loop() {
   unsigned long currentTime = millis();
-
-  // Maintain WiFi connection
-  if (!WiFi.isConnected()) {
+  
+  // Check WiFi connection
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ WiFi disconnected. Reconnecting...");
     connectToWiFi();
   }
-
+  
   // Read all sensors every READ_INTERVAL milliseconds
   if (currentTime - lastReadTime >= READ_INTERVAL) {
     lastReadTime = currentTime;
-
-    // Read -> Print -> Send
-    readAllSensors();
-    printSensorData();
-    sendToOracleAPEX();
+    
+    Serial.println("\n╔══════════════════════════════════════════════════════╗");
+    Serial.println("║              SENSOR READING CYCLE                    ║");
+    Serial.print("║ Time: ");
+    Serial.print(currentTime / 1000);
+    Serial.println(" seconds                             ║");
+    Serial.println("╚══════════════════════════════════════════════════════╝\n");
+    
+    // Read all sensors
+    SensorData data = readAllSensors();
+    
+    if (data.valid) {
+      // Create and send JSON payload
+      String jsonPayload = createJSONPayload(data);
+      Serial.println("\n📤 JSON PAYLOAD:");
+      Serial.println(jsonPayload);
+      
+      // Send to API
+      sendDataToAPI(jsonPayload);
+    } else {
+      Serial.println("❌ Sensor data invalid - skipping transmission");
+    }
+    
+    Serial.println("\n════════════════════════════════════════════════════════\n");
   }
 }
 
-// ============ WIFI CONNECTION ============
+// ============ WiFi CONNECTION FUNCTION ============
 void connectToWiFi() {
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
-  WiFi.mode(WIFI_STA);
+  Serial.print("Connecting to WiFi");
   WiFi.begin(ssid, password);
-
+  
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-
-  if (WiFi.isConnected()) {
+  
+  if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n✓ WiFi connected");
-    Serial.print("IP address: ");
+    Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
   } else {
     Serial.println("\n❌ WiFi connection failed");
   }
 }
 
-// ============ READ ALL SENSORS (Populates the struct) ============
-void readAllSensors() {
-  // Get current timestamp
-  time_t now = time(nullptr);
-  sensorData.timestamp = (long)now;
-
-  // BMP280
-  sensorData.temperature_bmp280 = bmp.readTemperature();
-  sensorData.pressure = bmp.readPressure() / 100.0F;
-
+// ============ READ ALL SENSORS FUNCTION ============
+SensorData readAllSensors() {
+  SensorData data;
+  data.valid = true;
+  
+  // BMP280 readings
+  data.temp_bmp280 = bmp.readTemperature();
+  data.pressure = bmp.readPressure() / 100.0F;  // Pa to hPa
+  
   if (!baselineSet) {
-    baselinePressure = sensorData.pressure;
+    baselinePressure = data.pressure;
     baselineSet = true;
   }
-  // Use standard pressure for more consistent altitude
-  sensorData.altitude = bmp.readAltitude(PRESSURE_NORMAL);
-
-  // DHT22
-  sensorData.temperature_dht22 = dht.readTemperature();
-  sensorData.humidity = dht.readHumidity();
-
-  // Flame Sensor
-  sensorData.flame_raw = analogRead(FLAME_SENSOR_PIN);
-
-  // LDR
-  sensorData.light_raw = analogRead(LDR_PIN);
-
-  // MQ135
-  sensorData.mq135_raw = analogRead(MQ135_PIN);
-  sensorData.mq135_baseline = mq135_baseline;
-  sensorData.mq135_drop = sensorData.mq135_raw - mq135_baseline;
-
-  // MQ2
-  sensorData.mq2_raw = analogRead(MQ2_PIN);
-  sensorData.mq2_baseline = mq2_baseline;
-  sensorData.mq2_drop = sensorData.mq2_raw - mq2_baseline;
-
-  // MQ7
-  sensorData.mq7_raw = analogRead(MQ7_PIN);
-  sensorData.mq7_baseline = mq7_baseline;
-  sensorData.mq7_drop = sensorData.mq7_raw - mq7_baseline;
-}
-
-// ============ PRINT SENSOR DATA (Reads from struct) ============
-void printSensorData() {
-  unsigned long timeSeconds = millis() / 1000;
-  Serial.println("\n--- SENSOR READING CYCLE (" + String(timeSeconds) + "s) ---");
-
+  
+  data.altitude = bmp.readAltitude(baselinePressure);
+  
   Serial.println("🌍 BAROMETRIC PRESSURE (BMP280)");
   Serial.print("   Temperature: ");
-  Serial.print(sensorData.temperature_bmp280, 1);
+  Serial.print(data.temp_bmp280, 1);
   Serial.println(" °C");
   Serial.print("   Pressure: ");
-  Serial.print(sensorData.pressure, 2);
+  Serial.print(data.pressure, 2);
   Serial.println(" hPa");
-  Serial.print("   Altitude (approx): ");
-  Serial.print(sensorData.altitude, 1);
+  Serial.print("   Altitude: ");
+  Serial.print(data.altitude, 1);
   Serial.println(" m");
-
-  Serial.println("\n💧 TEMPERATURE & HUMIDITY (DHT22)");
-  if (isnan(sensorData.humidity) || isnan(sensorData.temperature_dht22)) {
+  
+  // DHT22 readings
+  data.humidity = dht.readHumidity();
+  data.temp_dht22 = dht.readTemperature();
+  
+  if (isnan(data.humidity) || isnan(data.temp_dht22)) {
+    Serial.println("💧 TEMPERATURE & HUMIDITY (DHT22)");
     Serial.println("   ❌ Sensor read error!");
-  } else {
-    Serial.print("   Temperature: ");
-    Serial.print(sensorData.temperature_dht22, 1);
-    Serial.println(" °C");
-    Serial.print("   Humidity: ");
-    Serial.print(sensorData.humidity, 1);
-    Serial.println(" %");
+    data.valid = false;
+    return data;
   }
-
-  Serial.println("\n🔥 FLAME DETECTION SENSOR");
+  
+  Serial.println("💧 TEMPERATURE & HUMIDITY (DHT22)");
+  Serial.print("   Temperature: ");
+  Serial.print(data.temp_dht22, 1);
+  Serial.println(" °C");
+  Serial.print("   Humidity: ");
+  Serial.print(data.humidity, 1);
+  Serial.println(" %");
+  
+  // Flame sensor
+  data.flame_raw = analogRead(FLAME_SENSOR_PIN);
+  Serial.println("🔥 FLAME DETECTION SENSOR");
   Serial.print("   Raw Value: ");
-  Serial.println(sensorData.flame_raw);
+  Serial.println(data.flame_raw);
   Serial.print("   Status: ");
-  if (sensorData.flame_raw < FLAME_THRESHOLD) {
+  if (data.flame_raw < FLAME_THRESHOLD) {
     Serial.println("⚠⚠ FLAME DETECTED ⚠⚠");
   } else {
     Serial.println("✓ No flame detected");
   }
-
-  Serial.println("\n💡 AMBIENT LIGHT SENSOR (LDR)");
+  
+  // LDR
+  data.light_raw = analogRead(LDR_PIN);
+  Serial.println("💡 AMBIENT LIGHT SENSOR (LDR)");
   Serial.print("   Raw Value: ");
-  Serial.println(sensorData.light_raw);
-
-  Serial.println("\n🌫️  MQ135 - CO2/AIR QUALITY");
+  Serial.println(data.light_raw);
+  
+  // Gas sensors
+  data.mq135_raw = analogRead(MQ135_PIN);
+  data.mq135_baseline = mq135_baseline;
+  data.mq135_drop = data.mq135_raw - mq135_baseline;
+  
+  Serial.println("🌫️  MQ135 - CO2/AIR QUALITY");
   Serial.print("   Raw: ");
-  Serial.print(sensorData.mq135_raw);
+  Serial.print(data.mq135_raw);
   Serial.print(" | Baseline: ");
-  Serial.print(sensorData.mq135_baseline);
+  Serial.print(data.mq135_baseline);
   Serial.print(" | Drop: ");
-  Serial.println(sensorData.mq135_drop);
-
-  Serial.println("\n💨 MQ2 - LPG/SMOKE DETECTION");
+  Serial.println(data.mq135_drop);
+  
+  data.mq2_raw = analogRead(MQ2_PIN);
+  data.mq2_baseline = mq2_baseline;
+  data.mq2_drop = data.mq2_raw - mq2_baseline;
+  
+  Serial.println("💨 MQ2 - LPG/SMOKE DETECTION");
   Serial.print("   Raw: ");
-  Serial.print(sensorData.mq2_raw);
+  Serial.print(data.mq2_raw);
   Serial.print(" | Baseline: ");
-  Serial.print(sensorData.mq2_baseline);
+  Serial.print(data.mq2_baseline);
   Serial.print(" | Drop: ");
-  Serial.println(sensorData.mq2_drop);
-
-  Serial.println("\n☠️  MQ7 - CARBON MONOXIDE (CO)");
+  Serial.println(data.mq2_drop);
+  
+  data.mq7_raw = analogRead(MQ7_PIN);
+  data.mq7_baseline = mq7_baseline;
+  data.mq7_drop = data.mq7_raw - mq7_baseline;
+  
+  Serial.println("☠️  MQ7 - CARBON MONOXIDE (CO)");
   Serial.print("   Raw: ");
-  Serial.print(sensorData.mq7_raw);
+  Serial.print(data.mq7_raw);
   Serial.print(" | Baseline: ");
-  Serial.print(sensorData.mq7_baseline);
+  Serial.print(data.mq7_baseline);
   Serial.print(" | Drop: ");
-  Serial.println(sensorData.mq7_drop);
-
-  Serial.print("\nTimestamp: ");
-  Serial.println(sensorData.timestamp);
+  Serial.println(data.mq7_drop);
+  
+  return data;
 }
 
-// ============ CREATE JSON PAYLOAD ============
-String createJsonPayload() {
-  // *** FIX APPLIED ***: Increased from 512 to 1024 to prevent buffer overflow.
-  StaticJsonDocument<1024> doc;
-
-  // Add all sensor data from the struct to the JSON document
-  doc["temperature_bmp280"] = sensorData.temperature_bmp280;
-  doc["temperature_dht22"]  = sensorData.temperature_dht22;
-  doc["pressure"]           = sensorData.pressure;
-  doc["altitude"]           = sensorData.altitude;
-  doc["humidity"]           = sensorData.humidity;
-
-  doc["flame_raw"] = sensorData.flame_raw;
-  doc["light_raw"] = sensorData.light_raw;
-
-  // MQ135
-  doc["mq135_raw"]      = sensorData.mq135_raw;
-  doc["mq135_baseline"] = sensorData.mq135_baseline;
-  doc["mq135_drop"]     = sensorData.mq135_drop;
-
-  // MQ2
-  doc["mq2_raw"]      = sensorData.mq2_raw;
-  doc["mq2_baseline"] = sensorData.mq2_baseline;
-  doc["mq2_drop"]     = sensorData.mq2_drop;
-
-  // MQ7
-  doc["mq7_raw"]      = sensorData.mq7_raw;
-  doc["mq7_baseline"] = sensorData.mq7_baseline;
-  doc["mq7_drop"]     = sensorData.mq7_drop;
-
-  // Timestamp
-  doc["timestamp"] = sensorData.timestamp;
-
+// ============ CREATE JSON PAYLOAD FUNCTION ============
+String createJSONPayload(SensorData data) {
+  // Create JSON document (size: 512 bytes should be enough)
+  JsonDocument doc;
+  
+  // Add Unix timestamp (seconds since epoch)
+  unsigned long currentTime = millis() / 1000;  // Convert to seconds
+  doc["timestamp"] = currentTime;
+  
+  // Add all sensor readings - matching your PL/SQL API exactly
+  doc["temperature_bmp280"] = round(data.temp_bmp280 * 100) / 100.0;  // 2 decimal places
+  doc["temperature_dht22"] = round(data.temp_dht22 * 100) / 100.0;
+  doc["pressure"] = round(data.pressure * 100) / 100.0;
+  doc["altitude"] = round(data.altitude * 100) / 100.0;
+  doc["humidity"] = round(data.humidity * 100) / 100.0;
+  
+  doc["flame_raw"] = data.flame_raw;
+  doc["light_raw"] = data.light_raw;
+  
+  doc["mq135_raw"] = data.mq135_raw;
+  doc["mq135_baseline"] = data.mq135_baseline;
+  doc["mq135_drop"] = data.mq135_drop;
+  
+  doc["mq2_raw"] = data.mq2_raw;
+  doc["mq2_baseline"] = data.mq2_baseline;
+  doc["mq2_drop"] = data.mq2_drop;
+  
+  doc["mq7_raw"] = data.mq7_raw;
+  doc["mq7_baseline"] = data.mq7_baseline;
+  doc["mq7_drop"] = data.mq7_drop;
+  
+  // Serialize to string
   String jsonString;
   serializeJson(doc, jsonString);
+  
   return jsonString;
 }
 
-// ============ SEND TO ORACLE APEX ============
-void sendToOracleAPEX() {
-  if (!WiFi.isConnected()) {
-    Serial.println("❌ WiFi not connected - skipping Oracle APEX POST");
+// ============ SEND DATA TO API FUNCTION ============
+void sendDataToAPI(String jsonPayload) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ Cannot send data - WiFi not connected");
     return;
   }
-
+  
   HTTPClient http;
-
-  // Allow insecure HTTPS connections (APEX may use a cert ESP32 doesn't recognize)
-  wifiClient.setInsecure();
-
-  http.begin(wifiClient, oracle_apex_url);
-
-  // *** FIX APPLIED ***: Increased to 20 seconds for more stability.
-  http.setTimeout(20000);
-
-  // -- ALL HEADERS --
+  
+  Serial.println("\n📡 SENDING DATA TO API...");
+  Serial.print("Endpoint: ");
+  Serial.println(serverURL);
+  
+  http.begin(serverURL);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("Accept", "application/json");
-  http.addHeader("User-Agent", "ESP32-Greenhouse-Monitor");
-
-  // Create and send JSON payload
-  String jsonPayload = createJsonPayload();
-
-  Serial.println("\n--- SENDING TO ORACLE APEX DATABASE ---");
-  Serial.println("JSON Payload:");
-  Serial.println(jsonPayload);
-
+  
+  // Send POST request
   int httpResponseCode = http.POST(jsonPayload);
-
-  Serial.print("\nHTTP Response Code: ");
-  Serial.println(httpResponseCode);
-
+  
+  // Check response
   if (httpResponseCode > 0) {
+    Serial.print("✓ HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    
     String response = http.getString();
-    Serial.println("Response Body:");
+    Serial.println("Response:");
     Serial.println(response);
-
-    if (httpResponseCode == 200 || httpResponseCode == 201) {
-      Serial.println("✓ Successfully posted to Oracle APEX");
-    } else {
-      Serial.println("⚠ Unexpected response code");
+    
+    if (httpResponseCode == 201) {
+      Serial.println("✓ Data successfully sent and stored!");
     }
   } else {
-    // This will print the error code, e.g., -11
-    Serial.print("❌ Connection Error Code: ");
+    Serial.print("❌ Error sending POST request. Error code: ");
     Serial.println(httpResponseCode);
+    Serial.print("Error: ");
+    Serial.println(http.errorToString(httpResponseCode).c_str());
   }
-
+  
   http.end();
-  Serial.println("----------------------------------------\n");
 }
 
-// ============ CALIBRATION FUNCTION (Unchanged) ============
+// ============ CALIBRATION FUNCTION ============
 void calibrateGasSensors() {
   Serial.println("Taking baseline readings in clean air...\n");
-
+  
+  // Take multiple readings and average
   long sum135 = 0, sum2 = 0, sum7 = 0;
   int samples = 50;
-
+  
   for (int i = 0; i < samples; i++) {
     sum135 += analogRead(MQ135_PIN);
     sum2 += analogRead(MQ2_PIN);
     sum7 += analogRead(MQ7_PIN);
     delay(50);
   }
-
+  
   mq135_baseline = sum135 / samples;
   mq2_baseline = sum2 / samples;
   mq7_baseline = sum7 / samples;
-
+  
   gas_sensors_calibrated = true;
-
+  
   Serial.print("MQ135 Baseline: ");
   Serial.println(mq135_baseline);
   Serial.print("MQ2 Baseline: ");
@@ -426,3 +417,50 @@ void calibrateGasSensors() {
   Serial.println(mq7_baseline);
   Serial.println("\n✓ Gas sensor calibration complete!\n");
 }
+
+/*
+ * ============================================================================
+ * CONFIGURATION INSTRUCTIONS:
+ * ============================================================================
+ * 
+ * 1. UPDATE WiFi CREDENTIALS (Lines 28-29):
+ *    const char* ssid = "YOUR_SSID";
+ *    const char* password = "YOUR_PASSWORD";
+ * 
+ * 2. UPDATE API ENDPOINT (Line 32):
+ *    const char* serverURL = "https://apex.oracle.com/pls/apex/...";
+ *    Replace with your actual Oracle APEX REST endpoint URL
+ * 
+ * 3. REQUIRED LIBRARIES:
+ *    - WiFi.h (built-in)
+ *    - HTTPClient.h (built-in)
+ *    - ArduinoJson.h (install via Library Manager - version 7.x)
+ *    - Adafruit_BMP280.h (install via Library Manager)
+ *    - DHT.h (install via Library Manager)
+ *    - Wire.h (built-in)
+ * 
+ * 4. JSON PAYLOAD STRUCTURE:
+ *    Matches your PL/SQL API exactly with fields:
+ *    - timestamp (Unix epoch in seconds)
+ *    - temperature_bmp280, temperature_dht22, pressure, altitude, humidity
+ *    - flame_raw, light_raw
+ *    - mq135_raw, mq135_baseline, mq135_drop
+ *    - mq2_raw, mq2_baseline, mq2_drop
+ *    - mq7_raw, mq7_baseline, mq7_drop
+ * 
+ * 5. WIRING REFERENCE:
+ *    Environmental Sensors:
+ *      Flame Sensor: GPIO 35 (Analog)
+ *      DHT22: GPIO 16 (Digital)
+ *      LDR: GPIO 34 (Analog)
+ *    
+ *    I2C Devices:
+ *      BMP280: SDA=GPIO 21, SCL=GPIO 22
+ *    
+ *    Gas Sensors:
+ *      MQ135: GPIO 32
+ *      MQ2: GPIO 33 (use voltage divider if 5V)
+ *      MQ7: GPIO 36 (use voltage divider if 5V)
+ * 
+ * ============================================================================
+ */
