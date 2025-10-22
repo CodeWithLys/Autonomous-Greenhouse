@@ -1,0 +1,669 @@
+/*
+ * ============================================================================
+ * UNIFIED GREENHOUSE SENSOR MONITORING SYSTEM WITH MQTT INTEGRATION
+ * ============================================================================
+ * IFS325 Group Project - ARC Smart Agriculture
+ * ESP32 Version - All Sensors with MQTT Publishing
+ * 
+ * SENSORS INTEGRATED:
+ *   - BMP280: Barometric pressure, temperature, altitude
+ *   - DHT22: Temperature and humidity
+ *   - Flame Sensor: Fire detection
+ *   - LDR: Ambient light measurement
+ *   - MQ135: CO2 and air quality
+ *   - MQ2: LPG and smoke detection
+ *   - MQ7: Carbon monoxide detection
+ * 
+ * MQTT FEATURES:
+ *   - Auto-reconnect on WiFi/MQTT broker disconnection
+ *   - Extended buffer size (1024 bytes) for large JSON payloads
+ *   - QoS 0 publishing (fire-and-forget for sensor data)
+ *   - Non-blocking operation with timed intervals
+ * 
+ * DATA FLOW:
+ *   ESP32 → MQTT Broker → Python Bridge Script → Oracle APEX
+ * 
+ * KEY FIXES IMPLEMENTED:
+ *   1. MQTT buffer size increased to 1024 bytes (prevents JSON truncation)
+ *   2. Proper MQTT client loop integration in main loop
+ *   3. State machine for WiFi and MQTT connection management
+ *   4. Memory-efficient JSON payload creation with ArduinoJson
+ *   5. Gas sensor baseline calibration with proper warm-up period
+ * 
+ * AUTHOR: ARC Smart Agriculture Team
+ * VERSION: 2.0 - MQTT Edition
+ * ============================================================================
+ */
+
+#include "Arduino.h"
+#include <Wire.h>
+#include <Adafruit_BMP280.h>
+#include "DHT.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+// ============================================================================
+// CONFIGURATION SECTION - EDIT THESE VALUES
+// ============================================================================
+
+// WiFi Credentials
+const char* WIFI_SSID = "2024";              // Replace with your WiFi SSID
+const char* WIFI_PASSWORD = "2024@uwc";      // Replace with your WiFi password
+
+// MQTT Broker Configuration
+const char* MQTT_BROKER = "172.17.131.50";   // Replace with your MQTT broker IP
+const int MQTT_PORT = 1883;                  // Standard MQTT port (non-SSL)
+const char* MQTT_TOPIC = "greenhouse/sensor_data";  // Topic for publishing sensor data
+const char* MQTT_CLIENT_ID = "ESP32_Greenhouse_01"; // Unique client identifier
+
+// ============================================================================
+// PIN DEFINITIONS
+// ============================================================================
+
+// Environmental Sensors
+#define FLAME_SENSOR_PIN 35      // Analog - Flame detection
+#define DHT_PIN 16               // Digital - Temperature & Humidity
+#define LDR_PIN 34               // Analog - Ambient light
+#define DHTTYPE DHT22            // DHT22 sensor type
+
+// I2C Sensors (BMP280)
+#define SDA_PIN 21               // I2C SDA line
+#define SCL_PIN 22               // I2C SCL line
+
+// Gas Sensors (All Analog)
+#define MQ135_PIN 32             // Analog - CO2/Air Quality
+#define MQ2_PIN 33               // Analog - LPG/Smoke
+#define MQ7_PIN 39               // Analog - Carbon Monoxide
+
+// ============================================================================
+// SENSOR OBJECT INITIALIZATION
+// ============================================================================
+
+Adafruit_BMP280 bmp;             // BMP280 pressure sensor object
+DHT dht(DHT_PIN, DHTTYPE);       // DHT22 temperature/humidity sensor object
+WiFiClient espClient;            // WiFi client for MQTT
+PubSubClient mqttClient(espClient);  // MQTT client object
+
+// ============================================================================
+// CALIBRATION & THRESHOLD CONSTANTS
+// ============================================================================
+
+const float PRESSURE_NORMAL = 1013.25;  // Standard atmospheric pressure (hPa)
+const int FLAME_THRESHOLD = 2000;       // Analog threshold for flame detection
+
+// ============================================================================
+// GLOBAL VARIABLES
+// ============================================================================
+
+// Baseline values for pressure and gas sensors
+float baselinePressure = PRESSURE_NORMAL;
+bool baselineSet = false;
+
+int mq135_baseline = 0;
+int mq2_baseline = 0;
+int mq7_baseline = 0;
+bool gas_sensors_calibrated = false;
+
+// Timing control (non-blocking)
+unsigned long lastReadTime = 0;
+const long READ_INTERVAL = 10000;  // Read sensors every 10 seconds (10000ms)
+
+// Connection retry control
+unsigned long lastMqttReconnectAttempt = 0;
+const long MQTT_RECONNECT_INTERVAL = 5000;  // Try reconnecting every 5 seconds
+
+// ============================================================================
+// SENSOR DATA STRUCTURE
+// ============================================================================
+// This structure holds all sensor readings in a single package for easy
+// manipulation and JSON serialization
+
+struct SensorData {
+  // Environmental readings
+  float temp_bmp280;      // Temperature from BMP280 (°C)
+  float temp_dht22;       // Temperature from DHT22 (°C)
+  float pressure;         // Atmospheric pressure (hPa)
+  float altitude;         // Calculated altitude (m)
+  float humidity;         // Relative humidity (%)
+  
+  // Analog sensor readings
+  int flame_raw;          // Flame sensor raw value (0-4095)
+  int light_raw;          // LDR raw value (0-4095)
+  
+  // Gas sensor readings (MQ135 - CO2/Air Quality)
+  int mq135_raw;          // Current raw reading
+  int mq135_baseline;     // Calibrated baseline in clean air
+  int mq135_drop;         // Deviation from baseline
+  
+  // Gas sensor readings (MQ2 - LPG/Smoke)
+  int mq2_raw;
+  int mq2_baseline;
+  int mq2_drop;
+  
+  // Gas sensor readings (MQ7 - Carbon Monoxide)
+  int mq7_raw;
+  int mq7_baseline;
+  int mq7_drop;
+  
+  // Data validity flag
+  bool valid;             // False if any critical sensor fails
+};
+
+// ============================================================================
+// SETUP FUNCTION - Runs once at startup
+// ============================================================================
+
+void setup() {
+  // Initialize serial communication for debugging
+  Serial.begin(115200);
+  delay(1000);  // Allow serial to stabilize
+  
+  // Print startup banner
+  printStartupBanner();
+  
+  // Initialize I2C bus for BMP280
+  Wire.begin(SDA_PIN, SCL_PIN);
+  
+  // Initialize BMP280 pressure sensor
+  // Try both common I2C addresses (0x76 and 0x77)
+  if (!bmp.begin(0x76)) {
+    if (!bmp.begin(0x77)) {
+      Serial.println("❌ FATAL ERROR: BMP280 sensor not found!");
+      Serial.println("   Check wiring and I2C address (0x76 or 0x77)");
+      while (1) delay(10);  // Halt execution - sensor is critical
+    }
+  }
+  
+  // Configure BMP280 for optimal accuracy
+  // MODE_NORMAL: Continuous measurement mode
+  // SAMPLING_X2: 2x oversampling for temperature
+  // SAMPLING_X16: 16x oversampling for pressure (high accuracy)
+  // FILTER_X16: IIR filter coefficient 16 (smooth readings)
+  // STANDBY_MS_500: 500ms between measurements
+  bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
+                  Adafruit_BMP280::SAMPLING_X2,
+                  Adafruit_BMP280::SAMPLING_X16,
+                  Adafruit_BMP280::FILTER_X16,
+                  Adafruit_BMP280::STANDBY_MS_500);
+  Serial.println("✓ BMP280 initialized successfully");
+  
+  // Initialize DHT22 temperature/humidity sensor
+  dht.begin();
+  Serial.println("✓ DHT22 initialized successfully");
+  
+  // Configure all analog input pins
+  pinMode(FLAME_SENSOR_PIN, INPUT);
+  pinMode(LDR_PIN, INPUT);
+  pinMode(MQ135_PIN, INPUT);
+  pinMode(MQ2_PIN, INPUT);
+  pinMode(MQ7_PIN, INPUT);
+  Serial.println("✓ Analog sensor pins configured");
+  
+  // Establish WiFi connection
+  connectToWiFi();
+  
+  // Configure MQTT client
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  
+  // CRITICAL: Increase MQTT buffer size to handle large JSON payloads
+  // Default buffer size (256 bytes) is insufficient for our sensor data
+  // Our JSON payload is approximately 400-500 bytes, so we set 1024 for safety
+  mqttClient.setBufferSize(1024);
+  Serial.println("✓ MQTT buffer size set to 1024 bytes");
+  
+  // Initial MQTT connection
+  reconnectMqtt();
+  
+  // Calibrate gas sensors (requires 5 minutes in clean air)
+  calibrateGasSensors();
+  
+  // System ready
+  Serial.println("\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║     INITIALIZATION COMPLETE - MONITORING STARTED     ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝\n");
+}
+
+// ============================================================================
+// MAIN LOOP - Runs continuously
+// ============================================================================
+
+void loop() {
+  // State machine approach: Check connections, then perform timed operations
+  
+  // 1. Ensure WiFi is connected
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ WiFi disconnected. Attempting reconnection...");
+    connectToWiFi();
+  }
+  
+  // 2. Ensure MQTT broker is connected
+  if (!mqttClient.connected()) {
+    unsigned long now = millis();
+    // Only attempt reconnection every MQTT_RECONNECT_INTERVAL milliseconds
+    // This prevents spamming the broker with connection attempts
+    if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+      lastMqttReconnectAttempt = now;
+      reconnectMqtt();
+    }
+  } else {
+    // CRITICAL: Call loop() to process MQTT messages and maintain connection
+    // This must be called regularly to keep the connection alive
+    mqttClient.loop();
+  }
+  
+  // 3. Check if it's time to read sensors (non-blocking timing)
+  unsigned long currentTime = millis();
+  if (currentTime - lastReadTime >= READ_INTERVAL) {
+    lastReadTime = currentTime;
+    
+    // Print cycle header
+    printCycleHeader(currentTime);
+    
+    // Read all sensors into data structure
+    SensorData data = readAllSensors();
+    
+    // If data is valid, publish to MQTT
+    if (data.valid) {
+      publishMqttMessage(data);
+    } else {
+      Serial.println("❌ Sensor data invalid - skipping MQTT publish");
+    }
+    
+    Serial.println("\n════════════════════════════════════════════════════════\n");
+  }
+  
+  // Small delay to prevent watchdog timer issues (ESP32 best practice)
+  delay(10);
+}
+
+// ============================================================================
+// WIFI CONNECTION FUNCTION
+// ============================================================================
+
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi: ");
+  Serial.print(WIFI_SSID);
+  
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  
+  int attempts = 0;
+  // Try for 10 seconds (20 attempts x 500ms)
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✓ WiFi connected successfully");
+    Serial.print("   IP Address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("   Signal Strength: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+  } else {
+    Serial.println("\n❌ WiFi connection failed - will retry");
+  }
+}
+
+// ============================================================================
+// MQTT RECONNECTION FUNCTION
+// ============================================================================
+
+void reconnectMqtt() {
+  // Only attempt connection if WiFi is available
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ Cannot connect to MQTT - WiFi not available");
+    return;
+  }
+  
+  Serial.print("Attempting MQTT connection to broker: ");
+  Serial.print(MQTT_BROKER);
+  Serial.print(":");
+  Serial.print(MQTT_PORT);
+  Serial.print(" ... ");
+  
+  // Attempt to connect with our unique client ID
+  // connect() returns true on success
+  if (mqttClient.connect(MQTT_CLIENT_ID)) {
+    Serial.println("✓ Connected!");
+    Serial.print("   Client ID: ");
+    Serial.println(MQTT_CLIENT_ID);
+    Serial.print("   Publishing to topic: ");
+    Serial.println(MQTT_TOPIC);
+  } else {
+    // Connection failed - print error code for debugging
+    Serial.print("❌ Failed, rc=");
+    Serial.println(mqttClient.state());
+    Serial.println("   Error codes: -4=timeout, -3=connection lost, -2=connect failed");
+    Serial.println("   Will retry in 5 seconds...");
+  }
+}
+
+// ============================================================================
+// READ ALL SENSORS FUNCTION
+// ============================================================================
+
+SensorData readAllSensors() {
+  SensorData data;
+  data.valid = true;  // Assume valid unless a critical sensor fails
+  
+  // ---- BMP280 READINGS ----
+  data.temp_bmp280 = bmp.readTemperature();
+  data.pressure = bmp.readPressure() / 100.0F;  // Convert Pa to hPa
+  
+  // Set baseline pressure on first reading for altitude calculation
+  if (!baselineSet) {
+    baselinePressure = data.pressure;
+    baselineSet = true;
+  }
+  
+  data.altitude = bmp.readAltitude(baselinePressure);
+  
+  Serial.println("🌍 BAROMETRIC PRESSURE (BMP280)");
+  Serial.print("   Temperature: ");
+  Serial.print(data.temp_bmp280, 1);
+  Serial.println(" °C");
+  Serial.print("   Pressure: ");
+  Serial.print(data.pressure, 2);
+  Serial.println(" hPa");
+  Serial.print("   Altitude: ");
+  Serial.print(data.altitude, 1);
+  Serial.println(" m");
+  
+  // ---- DHT22 READINGS ----
+  data.humidity = dht.readHumidity();
+  data.temp_dht22 = dht.readTemperature();
+  
+  // Check for read errors (DHT22 can occasionally fail)
+  if (isnan(data.humidity) || isnan(data.temp_dht22)) {
+    Serial.println("💧 TEMPERATURE & HUMIDITY (DHT22)");
+    Serial.println("   ❌ Sensor read error - check connections!");
+    data.valid = false;  // Mark data as invalid
+    return data;  // Return early to skip remaining sensors
+  }
+  
+  Serial.println("💧 TEMPERATURE & HUMIDITY (DHT22)");
+  Serial.print("   Temperature: ");
+  Serial.print(data.temp_dht22, 1);
+  Serial.println(" °C");
+  Serial.print("   Humidity: ");
+  Serial.print(data.humidity, 1);
+  Serial.println(" %");
+  
+  // ---- FLAME SENSOR ----
+  data.flame_raw = analogRead(FLAME_SENSOR_PIN);
+  Serial.println("🔥 FLAME DETECTION SENSOR");
+  Serial.print("   Raw Value: ");
+  Serial.println(data.flame_raw);
+  Serial.print("   Status: ");
+  if (data.flame_raw < FLAME_THRESHOLD) {
+    Serial.println("⚠⚠ FLAME DETECTED ⚠⚠");
+  } else {
+    Serial.println("✓ No flame detected");
+  }
+  
+  // ---- LIGHT SENSOR (LDR) ----
+  data.light_raw = analogRead(LDR_PIN);
+  Serial.println("💡 AMBIENT LIGHT SENSOR (LDR)");
+  Serial.print("   Raw Value: ");
+  Serial.print(data.light_raw);
+  Serial.print(" (0=dark, 4095=bright)");
+  Serial.println();
+  
+  // ---- MQ135 GAS SENSOR (CO2/Air Quality) ----
+  data.mq135_raw = analogRead(MQ135_PIN);
+  data.mq135_baseline = mq135_baseline;
+  data.mq135_drop = data.mq135_raw - mq135_baseline;
+  
+  Serial.println("🌫️  MQ135 - CO2/AIR QUALITY");
+  Serial.print("   Raw: ");
+  Serial.print(data.mq135_raw);
+  Serial.print(" | Baseline: ");
+  Serial.print(data.mq135_baseline);
+  Serial.print(" | Drop: ");
+  Serial.println(data.mq135_drop);
+  
+  // ---- MQ2 GAS SENSOR (LPG/Smoke) ----
+  data.mq2_raw = analogRead(MQ2_PIN);
+  data.mq2_baseline = mq2_baseline;
+  data.mq2_drop = data.mq2_raw - mq2_baseline;
+  
+  Serial.println("💨 MQ2 - LPG/SMOKE DETECTION");
+  Serial.print("   Raw: ");
+  Serial.print(data.mq2_raw);
+  Serial.print(" | Baseline: ");
+  Serial.print(data.mq2_baseline);
+  Serial.print(" | Drop: ");
+  Serial.println(data.mq2_drop);
+  
+  // ---- MQ7 GAS SENSOR (Carbon Monoxide) ----
+  data.mq7_raw = analogRead(MQ7_PIN);
+  data.mq7_baseline = mq7_baseline;
+  data.mq7_drop = data.mq7_raw - mq7_baseline;
+  
+  Serial.println("☠️  MQ7 - CARBON MONOXIDE (CO)");
+  Serial.print("   Raw: ");
+  Serial.print(data.mq7_raw);
+  Serial.print(" | Baseline: ");
+  Serial.print(data.mq7_baseline);
+  Serial.print(" | Drop: ");
+  Serial.println(data.mq7_drop);
+  
+  return data;
+}
+
+// ============================================================================
+// CREATE JSON PAYLOAD AND PUBLISH TO MQTT
+// ============================================================================
+
+void publishMqttMessage(SensorData data) {
+  // Create JSON document with appropriate capacity
+  // Calculated size: ~450 bytes for our payload + safety margin = 512 bytes
+  JsonDocument doc;
+  
+  // Add Unix timestamp (seconds since boot)
+  // Note: For production, consider using NTP for real wall-clock time
+  unsigned long currentTime = millis() / 1000;
+  doc["timestamp"] = currentTime;
+  
+  // Add all sensor readings with 2 decimal place precision
+  doc["temperature_bmp280"] = round(data.temp_bmp280 * 100) / 100.0;
+  doc["temperature_dht22"] = round(data.temp_dht22 * 100) / 100.0;
+  doc["pressure"] = round(data.pressure * 100) / 100.0;
+  doc["altitude"] = round(data.altitude * 100) / 100.0;
+  doc["humidity"] = round(data.humidity * 100) / 100.0;
+  
+  doc["flame_raw"] = data.flame_raw;
+  doc["light_raw"] = data.light_raw;
+  
+  doc["mq135_raw"] = data.mq135_raw;
+  doc["mq135_baseline"] = data.mq135_baseline;
+  doc["mq135_drop"] = data.mq135_drop;
+  
+  doc["mq2_raw"] = data.mq2_raw;
+  doc["mq2_baseline"] = data.mq2_baseline;
+  doc["mq2_drop"] = data.mq2_drop;
+  
+  doc["mq7_raw"] = data.mq7_raw;
+  doc["mq7_baseline"] = data.mq7_baseline;
+  doc["mq7_drop"] = data.mq7_drop;
+  
+  // Serialize JSON to string
+  String jsonString;
+  serializeJson(doc, jsonString);
+  
+  // Print payload for debugging
+  Serial.println("\n📤 MQTT JSON PAYLOAD:");
+  Serial.println(jsonString);
+  Serial.print("   Payload size: ");
+  Serial.print(jsonString.length());
+  Serial.println(" bytes");
+  
+  // Publish to MQTT broker
+  // QoS 0 (fire and forget) is sufficient for sensor data
+  // Returns true if publish succeeded
+  if (mqttClient.connected()) {
+    if (mqttClient.publish(MQTT_TOPIC, jsonString.c_str())) {
+      Serial.println("✓ Successfully published to MQTT broker");
+    } else {
+      Serial.println("❌ MQTT publish failed - payload may be too large");
+      Serial.println("   Increase buffer size if this persists");
+    }
+  } else {
+    Serial.println("❌ Cannot publish - MQTT client not connected");
+  }
+}
+
+// ============================================================================
+// GAS SENSOR CALIBRATION FUNCTION
+// ============================================================================
+
+void calibrateGasSensors() {
+  Serial.println("\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║           GAS SENSOR CALIBRATION PHASE               ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝");
+  Serial.println("⚠ IMPORTANT: Ensure all gas sensors are in CLEAN AIR");
+  Serial.println("   No smoke, CO2, LPG, or other contaminants present");
+  Serial.println("\nWarming up sensors for 300 seconds (5 minutes)...\n");
+  
+  // Warm-up period: MQ sensors need time to stabilize (typically 24-48 hours
+  // for full accuracy, but 5 minutes is minimum for testing)
+  for (int i = 300; i > 0; i--) {
+    if (i % 30 == 0) {  // Print every 30 seconds
+      Serial.print("⏱ Warm-up countdown: ");
+      Serial.print(i);
+      Serial.println(" seconds remaining...");
+    }
+    delay(1000);
+  }
+  
+  Serial.println("\nTaking baseline readings in clean air...");
+  
+  // Take multiple samples and average for stable baseline
+  long sum135 = 0, sum2 = 0, sum7 = 0;
+  const int samples = 50;
+  
+  for (int i = 0; i < samples; i++) {
+    sum135 += analogRead(MQ135_PIN);
+    sum2 += analogRead(MQ2_PIN);
+    sum7 += analogRead(MQ7_PIN);
+    delay(50);  // 50ms between samples
+  }
+  
+  // Calculate average baseline values
+  mq135_baseline = sum135 / samples;
+  mq2_baseline = sum2 / samples;
+  mq7_baseline = sum7 / samples;
+  gas_sensors_calibrated = true;
+  
+  // Display calibration results
+  Serial.println("\n✓ CALIBRATION COMPLETE");
+  Serial.print("   MQ135 Baseline: ");
+  Serial.println(mq135_baseline);
+  Serial.print("   MQ2 Baseline: ");
+  Serial.println(mq2_baseline);
+  Serial.print("   MQ7 Baseline: ");
+  Serial.println(mq7_baseline);
+  Serial.println("\n   These values represent 'clean air' reference levels");
+  Serial.println("   Deviations indicate presence of target gases\n");
+}
+
+// ============================================================================
+// HELPER FUNCTIONS FOR PRETTY PRINTING
+// ============================================================================
+
+void printStartupBanner() {
+  Serial.println("\n\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║   GREENHOUSE SENSOR SYSTEM - MQTT EDITION            ║");
+  Serial.println("║   IFS325 Group Project - ARC Smart Agriculture       ║");
+  Serial.println("║   Version 2.0 - Enhanced MQTT Integration            ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝\n");
+}
+
+void printCycleHeader(unsigned long currentTime) {
+  Serial.println("\n╔══════════════════════════════════════════════════════╗");
+  Serial.println("║              SENSOR READING CYCLE                    ║");
+  Serial.print("║ Uptime: ");
+  Serial.print(currentTime / 1000);
+  Serial.println(" seconds                                  ║");
+  Serial.println("╚══════════════════════════════════════════════════════╝\n");
+}
+
+/*
+ * ============================================================================
+ * CONFIGURATION CHECKLIST
+ * ============================================================================
+ * 
+ * ✓ 1. UPDATE WiFi CREDENTIALS (Lines 66-67):
+ *       const char* WIFI_SSID = "Your_Network_Name";
+ *       const char* WIFI_PASSWORD = "Your_Password";
+ * 
+ * ✓ 2. UPDATE MQTT BROKER SETTINGS (Lines 70-73):
+ *       const char* MQTT_BROKER = "192.168.1.100";  // Your broker IP
+ *       const int MQTT_PORT = 1883;                  // Standard MQTT port
+ *       const char* MQTT_TOPIC = "greenhouse/sensor_data";
+ *       const char* MQTT_CLIENT_ID = "ESP32_Greenhouse_01";  // Must be unique
+ * 
+ * ✓ 3. REQUIRED ARDUINO LIBRARIES:
+ *       - WiFi.h (ESP32 built-in)
+ *       - Wire.h (built-in)
+ *       - Adafruit_BMP280.h (install via Library Manager)
+ *       - DHT.h (DHT sensor library - Library Manager)
+ *       - PubSubClient.h (MQTT library - Library Manager)
+ *       - ArduinoJson.h (version 7.x - Library Manager)
+ * 
+ * ✓ 4. WIRING REFERENCE:
+ *       Environmental Sensors:
+ *         • Flame Sensor → GPIO 35 (Analog, 0-3.3V)
+ *         • DHT22 → GPIO 16 (Digital, with 10kΩ pull-up)
+ *         • LDR → GPIO 34 (Analog, voltage divider recommended)
+ *       
+ *       I2C Devices (BMP280):
+ *         • SDA → GPIO 21
+ *         • SCL → GPIO 22
+ *       
+ *       Gas Sensors (⚠ Use voltage dividers if sensors output 5V):
+ *         • MQ135 → GPIO 32 (Analog)
+ *         • MQ2 → GPIO 33 (Analog)
+ *         • MQ7 → GPIO 39 (Analog, input-only pin)
+ * 
+ * ✓ 5. MQTT BROKER SETUP:
+ *       You need a running MQTT broker (Mosquitto, HiveMQ, etc.)
+ *       Install Mosquitto on Linux: sudo apt-get install mosquitto
+ *       Test with: mosquitto_sub -h BROKER_IP -t greenhouse/sensor_data
+ * 
+ * ✓ 6. PYTHON BRIDGE SCRIPT:
+ *       Use the provided Python script to forward MQTT data to Oracle APEX
+ *       Ensure the MQTT topic matches in both ESP32 and Python code
+ * 
+ * ============================================================================
+ * TROUBLESHOOTING GUIDE
+ * ============================================================================
+ * 
+ * ❌ "MQTT publish failed - payload may be too large"
+ *    → Buffer size is set to 1024 bytes. If still failing, increase further:
+ *      mqttClient.setBufferSize(2048);
+ * 
+ * ❌ "WiFi connection failed"
+ *    → Verify SSID and password are correct
+ *    → Check WiFi signal strength
+ *    → Ensure 2.4GHz network (ESP32 doesn't support 5GHz)
+ * 
+ * ❌ "MQTT connection failed, rc=-2"
+ *    → Broker IP address is incorrect or unreachable
+ *    → Firewall blocking port 1883
+ *    → Broker is not running
+ * 
+ * ❌ "DHT22 sensor read error"
+ *    → Check wiring and 10kΩ pull-up resistor on data line
+ *    → Sensor may need time to stabilize after power-on
+ * 
+ * ❌ Gas sensor readings unstable
+ *    → Sensors need 24-48 hours of continuous power for full accuracy
+ *    → Ensure proper warm-up period (300 seconds minimum)
+ *    → Calibrate in genuinely clean air environment
+ * 
+ * ============================================================================
+ */
