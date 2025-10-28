@@ -503,10 +503,11 @@ SensorData readAllSensors() {
   
   // Calculate brightness percentage
   if (ldr_calibrated) {
-    data.light_percent = map(data.light_raw, ldr_min, ldr_max, 0, 100);
+    data.light_percent = map(data.light_raw, ldr_min, ldr_max, 100, 0;
     data.light_percent = constrain(data.light_percent, 0, 100);
   } else {
-    data.light_percent = map(data.light_raw, 0, 4095, 0, 100);
+    data.light_percent = map(data.light_raw, 0, 4095, 100, 0);
+    data.light_percent = constrain(data.light_percent, 0, 100);
   }
   
   Serial.println("💡 AMBIENT LIGHT SENSOR (LDR)");
