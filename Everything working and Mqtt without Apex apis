@@ -41,7 +41,7 @@ const char* WIFI_PASSWORD = "2024@uwc";
 // MQTT Broker Configuration
 const char* MQTT_BROKER = "172.17.131.50";
 const int MQTT_PORT = 1883;
-const char* MQTT_TOPIC = "greenhouse/sensor_data";
+const char* MQTT_TOPIC = "arc/Greenhouse-monitoring/group9/Greenhouse-sensor";
 const char* MQTT_CLIENT_ID = "ESP32_Greenhouse_01";
 
 // Enable/Disable MQTT Output
