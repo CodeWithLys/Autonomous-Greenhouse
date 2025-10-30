@@ -35,11 +35,11 @@
 // ============================================================================
 
 // WiFi Credentials
-const char* WIFI_SSID = "2024";
-const char* WIFI_PASSWORD = "2024@uwc";
+const char* WIFI_SSID = "Wifi";
+const char* WIFI_PASSWORD = "password";
 
 // MQTT Broker Configuration
-const char* MQTT_BROKER = "172.17.131.50";
+const char* MQTT_BROKER = "10.222.99.189";
 const int MQTT_PORT = 1883;
 const char* MQTT_TOPIC = "arc/Greenhouse-monitoring/group9/Greenhouse-sensor";
 const char* MQTT_CLIENT_ID = "ESP32_Greenhouse_01";
@@ -503,7 +503,7 @@ SensorData readAllSensors() {
   
   // Calculate brightness percentage
   if (ldr_calibrated) {
-    data.light_percent = map(data.light_raw, ldr_min, ldr_max, 100, 0;
+    data.light_percent = map(data.light_raw, ldr_min, ldr_max, 100, 0);
     data.light_percent = constrain(data.light_percent, 0, 100);
   } else {
     data.light_percent = map(data.light_raw, 0, 4095, 100, 0);
@@ -566,7 +566,7 @@ SensorData readAllSensors() {
 void publishMqttMessage(SensorData data) {
   JsonDocument doc;
   
-  doc["timestamp"] = millis() / 1000;
+ // doc["timestamp"] = millis() / 1000;
   
   doc["temperature_bmp280"] = round(data.temp_bmp280 * 100) / 100.0;
   doc["temperature_dht22"] = round(data.temp_dht22 * 100) / 100.0;
