@@ -1,0 +1,265 @@
+/*
+ * ============================================================================
+ * UNIFIED GREENHOUSE CONTROL SYSTEM - MQTT SUBSCRIBER (SERVO ONLY)
+ * ============================================================================
+ * This ESP acts as a subscriber to the main sensor hub.
+ * It controls a servo (vents) based on MQTT messages.
+ * The fan is assumed to be on a separate, manual switch.
+ *
+ * ACTIONS:
+ * - Subscribes to: arc/Greenhouse-monitoring/group9/Greenhouse-sensor
+ * - On (flame_detected == 1):
+ * - Closes vents (servo to 90°)
+ * - On (flame_detected == 0):
+ * - Waits for 2 consecutive "safe" payloads.
+ * - Opens vents (servo to 180°)
+ * ============================================================================
+ */
+
+#include <ESP32Servo.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+// ============================================================================
+// CONFIGURATION SECTION - YOUR NEW SETTINGS
+// ============================================================================
+
+// WiFi Credentials (MUST match your publisher)
+const char* WIFI_SSID = "cabdullecismaancadde";
+const char* WIFI_PASSWORD = "Mohamed7!";
+
+// MQTT Broker Configuration (MUST match your publisher)
+const char* MQTT_BROKER = "192.168.43.39";
+const int MQTT_PORT = 1883;
+const char* MQTT_TOPIC = "arc/Greenhouse-monitoring/group9/Greenhouse-sensor";
+const char* MQTT_CLIENT_ID = "ESP32_Control_01"; // MUST be unique
+
+// --- Pin Definitions ---
+const int servoPin = 18;  // GPIO 18 for servo
+// --- Relay pin removed ---
+
+// --- Servo Configuration ---
+Servo myServo;
+const int VENT_OPEN_ANGLE = 180;  // Servo angle for vents open
+const int VENT_CLOSED_ANGLE = 90; // Servo angle for vents closed
+
+// --- MQTT Client Objects ---
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// --- State Variables ---
+bool alarmActive = false;           // Is the "alarm" (servo closed) state active?
+int safePayloadsCounter = 0;      // Counter for consecutive "safe" messages
+unsigned long lastMqttReconnectAttempt = 0;
+const long MQTT_RECONNECT_INTERVAL = 5000;
+
+// ============================================================================
+// SETUP FUNCTION
+// ============================================================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("\n=== GREENHOUSE CONTROL SYSTEM - MQTT SUBSCRIBER (SERVO ONLY) ===");
+  Serial.println("Initializing...\n");
+
+  // Attach servo
+  Serial.println("Attaching servo to GPIO 18...");
+  myServo.attach(servoPin, 500, 2400);
+  delay(500);
+
+  // Test servo
+  Serial.println("Testing servo...");
+  myServo.write(VENT_CLOSED_ANGLE);
+  Serial.println("Servo set to 90 degrees (CLOSED)");
+  delay(1000);
+  myServo.write(VENT_OPEN_ANGLE);
+  Serial.println("Servo set to 180 degrees (OPEN)");
+  delay(1000);
+
+  // --- Relay setup removed ---
+
+  // Set initial safe state
+  alarmActive = false;
+  safePayloadsCounter = 0;
+  Serial.println("\n-----------------");
+  Serial.println("Status: NORMAL (Initial)");
+  Serial.println("Vents: OPEN (180°)");
+  Serial.println("Fan: (Manual Control)");
+  Serial.println("-----------------\n");
+
+  // Connect to WiFi
+  connectToWiFi();
+
+  // Configure MQTT
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setBufferSize(1024); // Increase buffer to handle large JSON
+  mqttClient.setCallback(mqttCallback);
+  Serial.println("MQTT client configured.");
+
+  Serial.println("\nInitialization complete. Waiting for MQTT messages...");
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+void loop() {
+  // Check WiFi connection
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ WiFi disconnected. Attempting reconnection...");
+    connectToWiFi();
+  }
+
+  // Maintain MQTT connection
+  if (!mqttClient.connected()) {
+    unsigned long now = millis();
+    if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+      lastMqttReconnectAttempt = now;
+      reconnectMqtt();
+    }
+  } else {
+    mqttClient.loop();
+  }
+
+  // Small delay to be nice to the processor
+  delay(10);
+}
+
+// ============================================================================
+// WIFI CONNECTION FUNCTION
+// ============================================================================
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi: ");
+  Serial.print(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✓ WiFi connected successfully");
+    Serial.print("  IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n❌ WiFi connection failed - will retry");
+  }
+}
+
+// ============================================================================
+// MQTT RECONNECTION FUNCTION
+// ============================================================================
+void reconnectMqtt() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ Cannot connect to MQTT - WiFi not available");
+    return;
+  }
+
+  Serial.print("Attempting MQTT connection to ");
+  Serial.print(MQTT_BROKER);
+  Serial.print(" ... ");
+
+  if (mqttClient.connect(MQTT_CLIENT_ID)) {
+    Serial.println("✓ Connected!");
+    Serial.print("  Subscribing to topic: ");
+    Serial.println(MQTT_TOPIC);
+
+    // Subscribe to the topic
+    if (mqttClient.subscribe(MQTT_TOPIC)) {
+      Serial.println("  ✓ Successfully subscribed");
+    } else {
+      Serial.println("  ❌ Subscription failed");
+    }
+  } else {
+    Serial.print("❌ Failed, rc=");
+    Serial.println(mqttClient.state());
+  }
+}
+
+// ============================================================================
+// MQTT CALLBACK FUNCTION - THIS IS WHERE THE LOGIC HAPPENS
+// ============================================================================
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.println("\n-----------------");
+  Serial.println("📩 MQTT Message Received!");
+
+  // Convert payload to a string
+  char msg[length + 1];
+  memcpy(msg, payload, length);
+  msg[length] = '\0';
+  Serial.print("  Topic: ");
+  Serial.println(topic);
+  Serial.print("  Payload: ");
+  Serial.println(msg);
+
+  // Parse the JSON payload
+  JsonDocument doc; // Using ArduinoJson 7.x syntax
+  DeserializationError error = deserializeJson(doc, payload, length);
+
+  if (error) {
+    Serial.print("  JSON Parse Error: ");
+    Serial.println(error.c_str());
+    Serial.println("-----------------");
+    return;
+  }
+
+  // --- LOGIC IMPLEMENTATION ---
+
+  // Get the critical value
+  int flame_detected = doc["flame_detected"];
+
+  if (flame_detected == 1) {
+    // --- FLAME DETECTED ---
+    Serial.println("  Logic: FLAME DETECTED!");
+
+    // Reset the safe counter
+    safePayloadsCounter = 0;
+
+    // Only print and act if the alarm isn't already active
+    if (!alarmActive) {
+      Serial.println("  Action: TRIGGERING ALARM!");
+      myServo.write(VENT_CLOSED_ANGLE);
+      // --- Relay logic removed ---
+      alarmActive = true;
+      Serial.println("  Vents: CLOSED (90°)");
+      Serial.println("  Fan: (Manual Control - REMINDER: Turn OFF)");
+    } else {
+      Serial.println("  Action: Alarm already active. State maintained.");
+    }
+  } 
+  else {
+    // --- NO FLAME DETECTED (flame_detected == 0) ---
+    Serial.println("  Logic: NO FLAME detected in payload.");
+
+    if (alarmActive) {
+      // Alarm is on, we need to check if it's safe to turn off
+      safePayloadsCounter++;
+      Serial.print("  Action: Alarm is active. Safe payload count: ");
+      Serial.println(safePayloadsCounter);
+
+      if (safePayloadsCounter >= 2) {
+        // We have received 2 consecutive safe payloads
+        Serial.println("  Action: Two safe payloads received. CLEARING ALARM!");
+        myServo.write(VENT_OPEN_ANGLE);
+        // --- Relay logic removed ---
+        alarmActive = false;
+        safePayloadsCounter = 0; // Reset counter
+        Serial.println("  Vents: OPEN (180°)");
+        Serial.println("  Fan: (Manual Control)");
+      } else {
+        Serial.println("  Action: Waiting for one more safe payload to clear alarm.");
+      }
+    } 
+    else {
+      // Alarm is not active, system is already safe
+      Serial.println("  Action: System is already safe. No action needed.");
+      safePayloadsCounter = 0; // Keep counter at 0
+    }
+  }
+  Serial.println("-----------------");
+}
