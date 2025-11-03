@@ -1,0 +1,360 @@
+/*
+ * ============================================================================
+ * UNIFIED GREENHOUSE CONTROL SYSTEM - MQTT SUBSCRIBER (FINAL VERSION)
+ * ============================================================================
+ * This ESP acts as a subscriber to the main sensor hub.
+ * It controls a servo (vents) and a relay (fan) based on MQTT messages.
+ * It uses the "pinMode" toggle logic for the relay.
+ *
+ * A 2-pin button on GPIO 4 acts as a manual override:
+ * - Pressing it instantly toggles the current state (SAFE <-> ALARM).
+ * - The system then continues to listen for MQTT payloads, which will
+ * eventually override the manual setting.
+ *
+ * WIRING:
+ * - Button Pin 1 -> GND
+ * - Button Pin 2 -> ESP32 GPIO 4
+ *
+ * - Relay IN -> ESP32 GPIO 5
+ * - Relay VCC -> 5V (External Power)
+ * - Relay GND -> GND (External Power & ESP32 GND)
+ *
+ * - Servo Signal -> ESP32 GPIO 18
+ * - Servo VCC -> 5V (External Power)
+ * - Servo GND -> GND (External Power & ESP32 GND)
+ * ============================================================================
+ */
+
+// --- LIBRARIES ---
+#include <ESP32Servo.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+// ============================================================================
+// CONFIGURATION SECTION
+// ============================================================================
+
+// WiFi Credentials (MUST match your publisher)
+const char* WIFI_SSID = "2024";
+const char* WIFI_PASSWORD = "2024@uwc";
+
+// MQTT Broker Configuration (MUST match your publisher)
+const char* MQTT_BROKER = "172.17.129.122";
+const int MQTT_PORT = 1883;
+const char* MQTT_TOPIC = "arc/Greenhouse-monitoring/group9/Greenhouse-sensor";
+const char* MQTT_CLIENT_ID = "ESP32_Control_01_Final"; // MUST be unique
+
+// --- PIN DEFINITIONS ---
+const int BUTTON_PIN = 4;   // The pin your button is connected to
+const int RELAY_PIN = 5;    // GPIO 5 for relay
+const int servoPin = 18;    // GPIO 18 for servo
+
+// --- SERVO CONFIGURATION ---
+Servo myServo;
+const int VENT_OPEN_ANGLE = 180;  // Servo angle for vents open
+const int VENT_CLOSED_ANGLE = 90; // Servo angle for vents closed
+
+// --- MQTT CLIENT OBJECTS ---
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// ============================================================================
+// STATE & TIMING VARIABLES
+// ============================================================================
+
+// --- System State ---
+bool alarmActive = false;       // false = Safe State, true = Alarm State
+int safePayloadsCounter = 0;    // Counter for consecutive "safe" messages
+
+// --- MQTT Reconnect ---
+unsigned long lastMqttReconnectAttempt = 0;
+const long MQTT_RECONNECT_INTERVAL = 5000;
+
+// --- Button Debounce ---
+bool buttonState = HIGH;
+bool lastButtonState = HIGH;
+unsigned long lastDebounceTime = 0;
+const long debounceDelay = 50;
+
+// ============================================================================
+// SETUP FUNCTION
+// ============================================================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("\n=== GREENHOUSE CONTROL SYSTEM - MQTT SUBSCRIBER (FINAL) ===");
+
+  // --- Button Setup ---
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  Serial.println("Button configured on GPIO 4.");
+
+  // --- Servo Setup ---
+  myServo.attach(servoPin, 500, 2400);
+  Serial.println("Servo attached on GPIO 18.");
+
+  // --- Relay Setup ---
+  // Pin mode will be set by our new function
+  Serial.println("Relay configured on GPIO 5.");
+
+  // --- Set Initial State ---
+  Serial.println("Setting Initial SAFE State...");
+  setActuatorState(false); // false = SAFE
+  alarmActive = false;
+
+  Serial.println("\n-----------------");
+  Serial.println("Initial State: SAFE (Vents OPEN, Fan ON)");
+  Serial.println("-----------------");
+
+  // Connect to WiFi
+  connectToWiFi();
+
+  // Configure MQTT
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setBufferSize(1024); // Increase buffer to handle large JSON
+  mqttClient.setCallback(mqttCallback);
+  Serial.println("MQTT client configured.");
+
+  Serial.println("\nInitialization complete. Waiting for MQTT messages...");
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+void loop() {
+  // --- 1. Check Button for Manual Override ---
+  checkManualOverrideButton();
+  
+  // --- 2. Check WiFi connection ---
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ WiFi disconnected. Attempting reconnection...");
+    connectToWiFi();
+  }
+
+  // --- 3. Maintain MQTT connection ---
+  if (!mqttClient.connected()) {
+    unsigned long now = millis();
+    if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+      lastMqttReconnectAttempt = now;
+      reconnectMqtt();
+    }
+  } else {
+    // This is the "ear" that listens for messages
+    mqttClient.loop();
+  }
+
+  // Small delay to be nice to the processor
+  delay(10);
+}
+
+// ============================================================================
+// SET ACTUATOR STATE (NEW FUNCTION)
+// This is now the ONLY function that controls the hardware
+// ============================================================================
+void setActuatorState(bool isAlarm) {
+  if (isAlarm) {
+    // --- SET ALARM STATE ---
+    
+    // Fan OFF
+    pinMode(RELAY_PIN, INPUT_PULLUP); // Set pin to INPUT to turn relay OFF
+    
+    // Vents CLOSE
+    myServo.write(VENT_CLOSED_ANGLE);
+    
+  } else {
+    // --- SET SAFE STATE ---
+    
+    // Fan ON
+    pinMode(RELAY_PIN, OUTPUT);     // Set pin to OUTPUT
+    digitalWrite(RELAY_PIN, LOW); // Set pin LOW to turn relay ON
+    
+    // Vents OPEN
+    myServo.write(VENT_OPEN_ANGLE);
+  }
+}
+
+// ============================================================================
+// MANUAL OVERRIDE BUTTON FUNCTION
+// ============================================================================
+void checkManualOverrideButton() {
+  int reading = digitalRead(BUTTON_PIN);
+
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    if (reading != buttonState) {
+      buttonState = reading; // Save the new stable state
+
+      // Check if the button was just PRESSED (went from HIGH to LOW)
+      if (buttonState == LOW) {
+        
+        // Toggle the alarm state
+        alarmActive = !alarmActive; 
+        
+        Serial.println("\n-----------------");
+        Serial.println("🔘 MANUAL OVERRIDE CLICKED!");
+        
+        if (alarmActive) {
+          Serial.println("  Entering MANUAL ALARM State");
+          Serial.println("  Vents: CLOSED");
+          Serial.println("  Fan: OFF");
+        } else {
+          Serial.println("  Entering MANUAL SAFE State");
+          Serial.println("  Vents: OPEN");
+          Serial.println("  Fan: ON");
+        }
+        Serial.println("  (Waiting for next MQTT payload...)");
+        Serial.println("-----------------");
+
+        // --- Apply the new state to the hardware ---
+        setActuatorState(alarmActive);
+
+        // --- Reset the safe counter ---
+        // This ensures the manual state isn't undone by an old payload
+        safePayloadsCounter = 0; 
+      }
+    }
+  }
+  
+  lastButtonState = reading; // Save the reading for next time
+}
+
+// ============================================================================
+// WIFI CONNECTION FUNCTION
+// ============================================================================
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi: ");
+  Serial.print(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✓ WiFi connected successfully");
+    Serial.print("  IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n❌ WiFi connection failed - will retry");
+  }
+}
+
+// ============================================================================
+// MQTT RECONNECTION FUNCTION
+// ============================================================================
+void reconnectMqtt() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ Cannot connect to MQTT - WiFi not available");
+    return;
+  }
+
+  Serial.print("Attempting MQTT connection to ");
+  Serial.print(MQTT_BROKER);
+  Serial.print(" ... ");
+
+  if (mqttClient.connect(MQTT_CLIENT_ID)) {
+    Serial.println("✓ Connected!");
+    Serial.print("  Subscribing to topic: ");
+    Serial.println(MQTT_TOPIC);
+
+    // Subscribe to the topic
+    if (mqttClient.subscribe(MQTT_TOPIC)) {
+      Serial.println("  ✓ Successfully subscribed");
+    } else {
+      Serial.println("  ❌ Subscription failed");
+    }
+  } else {
+    Serial.print("❌ Failed, rc=");
+    Serial.println(mqttClient.state());
+  }
+}
+
+// ============================================================================
+// MQTT CALLBACK FUNCTION - THIS IS WHERE THE AUTO-LOGIC HAPPENS
+// ============================================================================
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  
+  Serial.println("\n-----------------");
+  Serial.println("📩 MQTT Message Received! (Auto Mode)");
+
+  // Convert payload to a string
+  char msg[length + 1];
+  memcpy(msg, payload, length);
+  msg[length] = '\0';
+  Serial.print("  Payload: ");
+  Serial.println(msg);
+
+  // Parse the JSON payload
+  JsonDocument doc; 
+  DeserializationError error = deserializeJson(doc, payload, length);
+
+  if (error) {
+    Serial.print("  JSON Parse Error: ");
+    Serial.println(error.c_str());
+    Serial.println("-----------------");
+    return;
+  }
+
+  // --- AUTOMATIC LOGIC IMPLEMENTATION ---
+
+  int flame_detected = doc["flame_detected"];
+
+  if (flame_detected == 1) {
+    // --- FLAME DETECTED ---
+    Serial.println("  Logic: FLAME DETECTED!");
+    
+    // Reset the safe counter
+    safePayloadsCounter = 0;
+
+    // Only act if the alarm isn't already active
+    if (!alarmActive) {
+      Serial.println("  Action: TRIGGERING ALARM!");
+      Serial.println("  Vents: CLOSED");
+      Serial.println("  Fan: OFF");
+      alarmActive = true;
+      setActuatorState(true); // Apply hardware change
+    } else {
+      Serial.println("  Action: Alarm already active. State maintained.");
+    }
+    
+  } 
+  else {
+    // --- NO FLAME DETECTED (flame_detected == 0) ---
+    Serial.println("  Logic: NO FLAME detected in payload.");
+
+    if (alarmActive) {
+      // Alarm is on, we need to check if it's safe to turn off
+      safePayloadsCounter++;
+      Serial.print("  Action: Alarm is active. Safe payload count: ");
+      Serial.println(safePayloadsCounter);
+
+      if (safePayloadsCounter >= 2) {
+        // We have received 2 consecutive safe payloads
+        Serial.println("  Action: Two safe payloads received. CLEARING ALARM!");
+        Serial.println("  Vents: OPEN");
+        Serial.println("  Fan: ON");
+        alarmActive = false;
+        setActuatorState(false); // Apply hardware change
+        safePayloadsCounter = 0; // Reset counter
+      } else {
+        Serial.println("  Action: Waiting for one more safe payload to clear alarm.");
+      }
+      
+    } 
+    else {
+      // Alarm is not active, system is already safe
+      Serial.println("  Action: System is already safe. No action needed.");
+      safePayloadsCounter = 0; // Keep counter at 0
+    }
+  }
+  Serial.println("-----------------");
+}
+
