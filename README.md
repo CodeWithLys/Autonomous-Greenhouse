@@ -60,7 +60,7 @@ Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle
 
 3. **Cloud Integration**  
    - Oracle APEX serves as the **real-time database** hosted by the **Data Management Team**.  
-   - The **Flutter App** retrieves data from Oracle APEX for real-time visualization and alerts.  
+   - The **Flutter App** retrieves data from Oracle APEX RESTful Services (APIs) for real-time visualization and alerts.  
 
 4. **Common Ground**  
    - Both 12V power supplies share a unified ground bus for stability and communication reliability.  
@@ -95,7 +95,7 @@ On **4 November 2025**, the **Agricultural Research Council (ARC)** joined our f
 - Enrique Thomas  
 
 **Supervised by:**  
-- *Lecturer Ruchen Wyngaard*  
+- A special thank you to our *Lecturer Ruchen Wyngaard* for all the support, project briefs that are extraordinary in their scope and vision, and for the real-world collaboration with companies. This has allowed us to put our theory into practice.
 
 ---
 
