@@ -5,7 +5,7 @@ This project — **EcoView**, a **resilient, low-cost greenhouse climate control
 
 ---
 
-## 🌍 Core System Overview  
+## Core System Overview  
 
 EcoView integrates **two ESP32 microcontrollers** operating in tandem:  
 - **Node 1 (Environmental Monitoring):** Gathers temperature, humidity, air quality, and light data using DHT22, BMP280, LDR, and MQ gas sensors.  
@@ -15,7 +15,7 @@ Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle
 
 ---
 
-## ⚙️ Key Resilience & Innovation Features  
+## Key Resilience & Innovation Features  
 
 ### 💧 Soil Management
 - Using a collaboration with a **Soil Management Team** for **soil sensors and data**.  
@@ -46,7 +46,7 @@ Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle
 
 ---
 
-## 🧠 System Architecture  
+## System Architecture  
 
 1. **Node 1 (Sensor Node)**  
    - DHT22, BMP280, LDR, MQ-series sensors.  
@@ -67,7 +67,7 @@ Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle
 
 ---
 
-## 🧩 System Flow Summary  
+## System Flow Summary  
 
 1. **Sensors** capture real-time data (temperature, humidity, gases, flame).  
 2. **ESP32 controllers** process readings, apply thresholds, and publish JSON payloads via MQTT.  
@@ -78,7 +78,7 @@ Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle
 
 ---
 
-## 🏢 Stakeholder Engagement  
+## Stakeholder Engagement  
 
 On **4 November 2025**, the **Agricultural Research Council (ARC)** joined our final presentation, reviewing EcoView’s real-world potential to enhance agricultural safety and efficiency in South Africa.  
 
