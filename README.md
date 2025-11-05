@@ -1,57 +1,103 @@
-# Autonomous-Greenhouse 🌿
- This project delivers a Resilient, Low-Cost Greenhouse Climate Control and Monitoring Solution explicitly engineered for the unique operational challenges within the South African agricultural sector, particularly mitigating risks associated with **seasonal fires, load shedding, water scarcity, and climate volatility**. 
+# EcoView 🌿  
+**Transforming Agriculture Through Technology and Sustainability**  
 
-
-
-##  Core Resilience Features
-
-### ⚡ Load Shedding Resilience (Power Autonomy)
-- The **NodeMCU** utilizes **Deep Sleep Mode (GPIO16→RST)**, reducing power draw to micro-amps.
-- Enables **continuous monitoring** during power outages.
-- Helps mitigate **30%–50% agricultural losses** linked to energy disruptions.
-
-### 💧 Precision Water Management
-- Calculates **Vapor Pressure Deficit (VPD)** using **DHT22 sensor data**.
-- Enables **targeted irrigation** by quantifying plant water stress.
-- Promotes **sustainable water usage** in response to rising irrigation demands.
-
-### 🛑 Local Safety Fail-Safe
-- Includes a **hardwired Emergency Button** (via interrupt) allowing **manual override** of automated systems.
-- Ensures **local control** (e.g., forcing fan ON via Relay Module) even when network connectivity fails.
-
-### 🔥 Fire and Hazard Detection
-- Integrates a **Flame Sensor** for early fire detection, crucial for **Cape Town’s dry-season risk zones**.
-- Automatically triggers **buzzer alerts** and **relay-based responses** to safeguard greenhouse environments.
-
-### 🧪 Cost-Effective Gas Safety
-- Employs **firmware-assisted rough calibration** for MQ-series gas sensors (e.g., **MQ7 for CO**).
-- Provides accurate **gas safety alerts** without the need for costly professional calibration (~R150 per sensor).
-
-### 🔔 Real-Time Audible Alerts
-- A **Buzzer Module** emits alerts when temperature, humidity, CO levels, or fire readings exceed **critical thresholds**.
-- Ensures **farmers are promptly notified** even during power or network interruptions.
-
-
-##  System Overview
-
-1. **Sensors** continuously collect temperature, humidity, gas, and fire data.  
-2. The **NodeMCU** processes readings, calculates VPD, and checks threshold conditions.  
-3. **Alerts** are issued via buzzer, and **actuators** (fans, relays) are triggered as needed.  
-4. Data can be transmitted to a **cloud or local dashboard** for visualization and control.  
-5. **Deep Sleep Mode** conserves energy between monitoring cycles.
-
-
-## 👥 Dev Team
-
-Developed by:  
-**Ismail Abrahams**, **Alyssa Jordan Krishna**, **Stacey Rosenburg**, **Xavier Jeniker**, **Griffiths Moshoeshoe**, and **Enrique Thomas**
-
-
-##  Acknowledgment
-
-Special thanks to **Lecturer Ruchen Wyngaard** for continuous guidance, mentorship, and for providing the project brief.
+This project — **EcoView**, a **resilient, low-cost greenhouse climate control and monitoring solution** designed specifically for the **South African agricultural context**, addressing challenges such as **seasonal wildfires, load shedding, water scarcity, and climate volatility**.  
 
 ---
 
-> 🌱 *Empowering sustainable agriculture through resilient, low-cost IoT innovation.*
+## 🌍 Core System Overview  
 
+EcoView integrates **two ESP32 microcontrollers** operating in tandem:  
+- **Node 1 (Environmental Monitoring):** Gathers temperature, humidity, air quality, and light data using DHT22, BMP280, LDR, and MQ gas sensors.  
+- **Node 2 (Fire Safety & Actuation):** Controls a servo motor for vents, fan, and relay system to respond to flame detection events and environmental thresholds.  
+
+Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle APEX cloud database**, where it is visualized and managed in real time through a **Flutter mobile application**.  
+
+---
+
+## ⚙️ Key Resilience & Innovation Features  
+
+### 💧 Soil Management
+- Uses **Soil Management** using **soil sensors and data**.  
+- Enables data-driven AI recommendations.  
+- Supports sustainable farming practices.
+
+### 🔥 Fire Detection and Ventilation Safety System
+- Developed in response to **Cape Town’s wildfire risks**.  
+- Integrates a **Flame IR Sensor** for early flame detection.  
+- On detection, the system:  
+  - Shuts down the **12V ventilation fan** via relay.  
+  - Activates the **SG90 servo motor** to close vent flaps, restricting oxygen flow.  
+  - Issues a local alert and cloud notification through Oracle APEX.  
+- Designed for both **climate control** and **fire containment**, ensuring dual functionality.
+
+### 🛑 Manual Safety Override
+- A **hardware emergency button** allows manual activation or deactivation of fans.  
+- Provides direct, local safety control even if Wi-Fi or cloud services are unavailable.
+
+### 🔔 Real-Time Data & Alerts
+- MQTT publishes JSON payloads directly to the **Oracle APEX** dashboard.  
+- The **Flutter app** displays live sensor data, AI recommendations, and system alerts for farm users.  
+- Enables farmers to view conditions and act immediately on abnormalities.
+
+### 🧪 Cost-Effective Gas Monitoring
+- Utilizes **MQ2, MQ7, and MQ135** sensors for gas detection (CO, CO₂, LPG, NH₃).  
+- Provides reliable safety monitoring through firmware calibration without costly hardware upgrades.  
+
+---
+
+## 🧠 System Architecture  
+
+1. **Node 1 (Sensor Node)**  
+   - DHT22, BMP280, LDR, MQ-series sensors.  
+   - Powered via 12V → Buck Converter (5V/3.3V).  
+   - Publishes environmental data via MQTT to Oracle APEX.  
+
+2. **Node 2 (Actuator Node)**  
+   - Flame IR Sensor, Servo Motor, Fan (via Relay), Manual Button.  
+   - Powered via 12V → Breadboard Power Module (5V).  
+   - Publishes flame alerts via MQTT and executes automated responses.  
+
+3. **Cloud Integration**  
+   - Oracle APEX serves as the **real-time database** hosted by the **Data Management Team**.  
+   - The **Flutter App** retrieves data from Oracle APEX for real-time visualization and alerts.  
+
+4. **Common Ground**  
+   - Both 12V power supplies share a unified ground bus for stability and communication reliability.  
+
+---
+
+## 🧩 System Flow Summary  
+
+1. **Sensors** capture real-time data (temperature, humidity, gases, flame).  
+2. **ESP32 controllers** process readings, apply thresholds, and publish JSON payloads via MQTT.  
+3. **Oracle APEX** receives and stores data in a cloud-hosted database.  
+4. **Flutter mobile app** displays live dashboards and notifications.  
+5. **Servo & Fan** automatically respond to fire or environmental triggers.  
+6. **Manual override button** provides emergency on-site control.  
+
+---
+
+## 🏢 Stakeholder Engagement  
+
+On **4 November 2025**, the **Agricultural Research Council (ARC)** joined our final presentation, reviewing EcoView’s real-world potential to enhance agricultural safety and efficiency in South Africa.  
+
+---
+
+## 👥 Development Team  
+
+**EcoView Project Team (Group 9):**  
+- Ismail Abrahams  
+- Alyssa Jordan Krishna  
+- Stacey Rosenburg  
+- Xavier Jeniker  
+- Griffiths Moshoeshoe  
+- Enrique Thomas  
+
+**Supervised by:**  
+- *Lecturer Ruchen Wyngaard*  
+
+---
+
+> 🌱 *EcoView – Empowering sustainable agriculture through smart, fire-resilient IoT innovation.*  
+> *Built by students, inspired by South African resilience.*
