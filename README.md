@@ -18,7 +18,7 @@ Data from both nodes is transmitted via **MQTT** as JSON payloads to an **Oracle
 ## ⚙️ Key Resilience & Innovation Features  
 
 ### 💧 Soil Management
-- Uses **Soil Management** using **soil sensors and data**.  
+- Using a collaboration with a **Soil Management Team** for **soil sensors and data**.  
 - Enables data-driven AI recommendations.  
 - Supports sustainable farming practices.
 
